@@ -273,3 +273,25 @@ async def test_gateway_reassigns_service_when_selected_exit_cannot_acknowledge(s
     )
     assert str(response.answer[0][0]) == "8.8.4.4"
     assert gateway.pool.choose(stack["owner"]["id"], "openai")["id"] == "second"
+
+
+@pytest.mark.asyncio
+async def test_history_expires_without_further_dns_queries(stack, dns_stack):
+    import time
+
+    gateway, _ = dns_stack
+    uid = stack["owner"]["id"]
+    with stack["db"].connect() as db:
+        db.execute(
+            "INSERT INTO dns_events(account_id,at,domain,qtype,result,elapsed_ms) VALUES(?,?,?,?,?,?)",
+            (uid, int(time.time()) - 86401, "expired.example", "A", "allowed", 1),
+        )
+    assert not stack["accounts"].stats(uid)["recent"]
+    task = asyncio.create_task(gateway.recorder.run())
+    try:
+        await asyncio.sleep(0.7)
+        with stack["db"].connect(readonly=True) as db:
+            assert db.execute("SELECT COUNT(*) FROM dns_events").fetchone()[0] == 0
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

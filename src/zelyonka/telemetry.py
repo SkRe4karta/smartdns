@@ -44,13 +44,15 @@ class Recorder:
             db.execute("DELETE FROM dns_events WHERE id < (SELECT MAX(id)-500000 FROM dns_events)")
 
     async def run(self) -> None:
+        last_cleanup = 0.0
         while True:
             await asyncio.sleep(0.5)
             rows: list[dict[str, Any]] = []
             while not self.queue.empty() and len(rows) < 1000:
                 rows.append(self.queue.get_nowait())
-            if rows:
+            if rows or time.monotonic() - last_cleanup >= 60:
                 try:
                     await asyncio.to_thread(self.flush, rows)
+                    last_cleanup = time.monotonic()
                 except Exception:
                     self.dropped += len(rows)
