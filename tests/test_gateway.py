@@ -276,7 +276,7 @@ async def test_gateway_reassigns_service_when_selected_exit_cannot_acknowledge(s
 
 
 @pytest.mark.asyncio
-async def test_history_expires_without_further_dns_queries(stack, dns_stack):
+async def test_history_expires_without_further_dns_queries(stack, dns_stack, monkeypatch):
     import time
 
     gateway, _ = dns_stack
@@ -287,9 +287,18 @@ async def test_history_expires_without_further_dns_queries(stack, dns_stack):
             (uid, int(time.time()) - 86401, "expired.example", "A", "allowed", 1),
         )
     assert not stack["accounts"].stats(uid)["recent"]
+    loop = asyncio.get_running_loop()
+    cleaned = asyncio.Event()
+    original_flush = gateway.recorder.flush
+
+    def flush(rows):
+        original_flush(rows)
+        loop.call_soon_threadsafe(cleaned.set)
+
+    monkeypatch.setattr(gateway.recorder, "flush", flush)
     task = asyncio.create_task(gateway.recorder.run())
     try:
-        await asyncio.sleep(0.7)
+        await asyncio.wait_for(cleaned.wait(), 5)
         with stack["db"].connect(readonly=True) as db:
             assert db.execute("SELECT COUNT(*) FROM dns_events").fetchone()[0] == 0
     finally:
