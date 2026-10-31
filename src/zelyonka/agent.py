@@ -159,7 +159,7 @@ class AgentEngine:
         self.http = httpx.AsyncClient(timeout=8)
 
     def ready(self) -> bool:
-        return time.monotonic() - self.last_tick <= 12 and self.last_error is None
+        return self.last_tick > 0 and time.monotonic() - self.last_tick <= 12 and self.last_error is None
 
     def snapshot(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
         with self.db.connect(readonly=True) as db:
@@ -452,7 +452,7 @@ def create_agent(engine: AgentEngine) -> FastAPI:
             },
             "generation": engine.generation,
             "error": engine.last_error,
-            "heartbeat_age": round(time.monotonic() - engine.last_tick, 1),
+            "heartbeat_age": round(time.monotonic() - engine.last_tick, 1) if engine.last_tick else None,
         }
 
     @app.post("/grant")

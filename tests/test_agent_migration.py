@@ -102,3 +102,9 @@ def test_alpha_migration_is_idempotent_readonly_and_keeps_compatibility(stack, t
             == "example.com"
         )
     assert stack["accounts"].authenticate(token) is None
+
+
+def test_agent_is_not_ready_before_first_reconciliation_on_fresh_boot(stack, tmp_path, monkeypatch):
+    engine = AgentEngine(stack["settings"], Adapter(tmp_path), state_dir=tmp_path / "state")
+    monkeypatch.setattr("zelyonka.agent.time.monotonic", lambda: 2.0)
+    assert not engine.ready()

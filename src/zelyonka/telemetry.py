@@ -50,7 +50,7 @@ class Recorder:
             rows: list[dict[str, Any]] = []
             while not self.queue.empty() and len(rows) < 1000:
                 rows.append(self.queue.get_nowait())
-            if rows or time.monotonic() - last_cleanup >= 60:
+            if rows or not last_cleanup or time.monotonic() - last_cleanup >= 60:
                 try:
                     await asyncio.to_thread(self.flush, rows)
                     last_cleanup = time.monotonic()

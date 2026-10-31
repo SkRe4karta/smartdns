@@ -66,7 +66,10 @@ class NodeEngine:
     def ready(self) -> bool:
         now = time.monotonic()
         return bool(
-            now - self.last_sync < 12
+            self.last_sync > 0
+            and self.last_cleanup > 0
+            and self.last_observation > 0
+            and now - self.last_sync < 12
             and now - self.last_cleanup < 12
             and now - self.last_observation < 90
             and self.observed_egress == self.settings.egress_ip
@@ -125,7 +128,7 @@ class NodeEngine:
 
     async def loop(self) -> None:
         while True:
-            if time.monotonic() - self.last_observation > 60:
+            if not self.last_observation or time.monotonic() - self.last_observation > 60:
                 await self.observe()
             try:
                 async with self.lock:
