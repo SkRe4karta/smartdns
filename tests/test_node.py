@@ -168,3 +168,10 @@ async def test_real_node_tls_requires_client_certificate(tmp_path):
     finally:
         server.should_exit = True
         await asyncio.wait_for(task, 5)
+
+
+def test_node_stays_closed_until_control_snapshot_on_fresh_boot(tmp_path, monkeypatch):
+    node = engine(tmp_path)
+    monkeypatch.setattr("smartdns.node.time.monotonic", lambda: 2.0)
+    node.last_cleanup = node.last_observation = 2.0
+    assert not node.ready()
