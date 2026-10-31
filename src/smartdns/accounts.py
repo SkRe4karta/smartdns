@@ -308,8 +308,8 @@ class Accounts:
             recent = [
                 dict(r)
                 for r in db.execute(
-                    "SELECT at,domain,qtype,result,service_id,elapsed_ms FROM dns_events WHERE account_id=? ORDER BY id DESC LIMIT 50",
-                    (account_id,),
+                    "SELECT at,domain,qtype,result,service_id,elapsed_ms FROM dns_events WHERE account_id=? AND at>=? ORDER BY id DESC LIMIT 50",
+                    (account_id, int(time.time()) - 86400),
                 )
             ]
         totals = {k: sum(int(b[k]) for b in buckets) for k in ("total", "blocked", "proxied", "errors")}
