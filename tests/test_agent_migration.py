@@ -137,3 +137,19 @@ async def test_reconciliation_does_not_accumulate_sqlite_descriptors(stack, tmp_
             gc.enable()
         gc.collect()
         await engine.http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_agent_rejects_exit_path_from_untrusted_database(stack, tmp_path, monkeypatch):
+    engine = AgentEngine(stack["settings"], Adapter(tmp_path), state_dir=tmp_path / "state")
+
+    async def forbidden(*args):
+        raise AssertionError("must not use node credentials path")
+
+    monkeypatch.setattr(engine, "remote_sync", forbidden)
+    with stack["db"].connect() as db:
+        db.execute(
+            "INSERT INTO exits(id,name,ingress_ip,egress_ip,country) VALUES('../fixture','Invalid','8.8.8.8','8.8.8.8','FI')"
+        )
+    assert not await engine.grant(stack["owner"]["id"], "1.1.1.1", "../fixture", stack["db"].generation())
+    await engine.http.aclose()
