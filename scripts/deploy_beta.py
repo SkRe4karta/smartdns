@@ -134,6 +134,8 @@ def prepare(archive, expected, commit, uv, staging_root):
         manifest = json.loads((release / "manifest.json").read_text())
         if manifest["commit"] != commit or manifest.get("dirty"):
             raise ValueError("Invalid existing release")
+    for directory in [release, *(path for path in release.rglob("*") if path.is_dir())]:
+        directory.chmod(0o755)
     config = {
         "data_dir": str(ROOT / "data"),
         "public_url": "https://dns.example.com",
