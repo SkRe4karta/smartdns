@@ -137,6 +137,6 @@ class Database:
     def backup(self, destination: Path) -> None:
         if destination.exists():
             raise FileExistsError(destination)
-        with self.connect(readonly=True) as source, sqlite3.connect(destination) as target:
+        with self.connect(readonly=True) as source, Database(destination).connect() as target:
             source.backup(target)
         destination.chmod(0o600)

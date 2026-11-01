@@ -108,3 +108,32 @@ def test_agent_is_not_ready_before_first_reconciliation_on_fresh_boot(stack, tmp
     engine = AgentEngine(stack["settings"], Adapter(tmp_path), state_dir=tmp_path / "state")
     monkeypatch.setattr("smartdns.agent.time.monotonic", lambda: 2.0)
     assert not engine.ready()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_does_not_accumulate_sqlite_descriptors(stack, tmp_path):
+    import gc
+    from pathlib import Path
+
+    adapter = Adapter(tmp_path)
+    engine = AgentEngine(stack["settings"], adapter, state_dir=tmp_path / "state")
+    gc.collect()
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        for _ in range(80):
+            await engine.reconcile()
+        descriptors = []
+        for path in Path("/proc/self/fd").iterdir():
+            try:
+                target = path.readlink()
+            except FileNotFoundError:
+                continue
+            if str(target).startswith(str(engine.leases)):
+                descriptors.append(target)
+        assert len(descriptors) <= 1, f"{len(descriptors)} unclosed lease database descriptors"
+    finally:
+        if enabled:
+            gc.enable()
+        gc.collect()
+        await engine.http.aclose()
