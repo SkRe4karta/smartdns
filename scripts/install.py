@@ -136,8 +136,8 @@ def main() -> None:
         "previous": previous,
         "settings": str(args.settings.resolve()),
         "units": args.units,
-        "db_uid": db.stat().st_uid if db.exists() else 0,
-        "db_gid": db.stat().st_gid if db.exists() else 0,
+        "db_uid": db.stat().st_uid if db.exists() else Path(config["data_dir"]).stat().st_uid,
+        "db_gid": db.stat().st_gid if db.exists() else Path(config["data_dir"]).stat().st_gid,
     }
     shutil.copy2(args.settings, backup / "settings.json")
     if key.exists():

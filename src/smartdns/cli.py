@@ -62,6 +62,13 @@ def main() -> None:
             with os.fdopen(fd, "wb") as f:
                 f.write(Fernet.generate_key())
         database.migrate()
+        lock = settings.data_dir / "catalog-update.lock"
+        if not lock.exists():
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o660)
+            os.close(fd)
+            if os.geteuid() == 0:
+                owner = settings.data_dir.stat()
+                os.chown(lock, owner.st_uid, owner.st_gid)
         with database.connect() as db:
             db.execute(
                 "INSERT INTO exits(id,name,ingress_ip,egress_ip,country) VALUES(?,'Local',?,?,'XX') ON CONFLICT(id) DO UPDATE SET ingress_ip=excluded.ingress_ip,egress_ip=excluded.egress_ip,enabled=1,healthy=1,control_url=NULL",

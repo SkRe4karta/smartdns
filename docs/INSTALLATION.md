@@ -22,7 +22,7 @@ Download the release archive and SHA256SUMS; run `sha256sum -c SHA256SUMS` befor
 ```sh
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin smartdns
 sudo install -d -m 0755 /opt/smartdns /opt/smartdns/releases
-sudo install -d -o smartdns -g smartdns -m 0770 /var/lib/smartdns
+sudo install -d -o smartdns -g smartdns -m 2770 /var/lib/smartdns
 sudo install -d -m 0700 /var/lib/smartdns-agent
 sudo install -d -o root -g smartdns -m 0750 /etc/smartdns
 sudo install -o root -g smartdns -m 0640 config/example.json /etc/smartdns/settings.json
