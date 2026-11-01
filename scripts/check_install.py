@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import tempfile
@@ -97,6 +99,46 @@ def main() -> None:
         cli("backup", str(root / "backup.sqlite3"))
         with sqlite3.connect(root / "backup.sqlite3") as db:
             assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        # Restore a real SQLite backup using the shipped rollback implementation.
+        # Service management is intercepted; no host services are touched in CI.
+        specification = importlib.util.spec_from_file_location("installer_check", app / "scripts/install.py")
+        assert specification and specification.loader
+        installer = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(installer)
+        install_root, restore_dir = root / "installation", root / "restore"
+        install_root.mkdir()
+        restore_dir.mkdir()
+        previous = install_root / "previous"
+        previous.mkdir()
+        shutil.copy2(root / "backup.sqlite3", restore_dir / "database.sqlite3")
+        shutil.copy2(root / "master.key", restore_dir / "master.key")
+        shutil.copy2(config, restore_dir / "settings.json")
+        (restore_dir / "installed.json").write_text('{"commit":"previous-fixture"}')
+        (install_root / "installed.json").write_text('{"commit":"candidate-fixture"}')
+        units = ["fixture-api", "fixture-gateway", "fixture-agent"]
+        (restore_dir / "restore.json").write_text(
+            json.dumps(
+                {
+                    "root": str(install_root),
+                    "units": units,
+                    "settings": str(config),
+                    "previous": str(previous),
+                    "db_uid": os.getuid(),
+                    "db_gid": os.getgid(),
+                }
+            )
+        )
+        with sqlite3.connect(root / "data/application.sqlite3") as db:
+            db.execute("UPDATE credentials SET version=99")
+        commands = []
+        installer.run = lambda command, **kwargs: commands.append(command)
+        installer.rollback(install_root, restore_dir, units)
+        assert commands[0] == ["systemctl", "stop", *units]
+        assert (install_root / "current").resolve() == previous
+        assert json.loads((install_root / "installed.json").read_text())["commit"] == "previous-fixture"
+        with sqlite3.connect(root / "data/application.sqlite3") as db:
+            assert db.execute("SELECT MAX(version) FROM credentials").fetchone()[0] == 1
+        assert (root / "master.key").read_bytes() == (restore_dir / "master.key").read_bytes()
         code = "from smartdns.config import Settings; from smartdns import __version__; import smartdns; s=Settings.load(); assert s.catalog_manifest.is_file(); print(__version__); print(smartdns.__file__)"
         installed = run([str(python), "-c", code], cwd=root, env=env)
         assert installed.splitlines()[0] == manifest["version"]
@@ -107,7 +149,7 @@ def main() -> None:
                 {
                     "clean_install": "passed",
                     "alpha_migration": "passed",
-                    "sqlite_backup": "passed",
+                    "sqlite_backup_restore": "passed",
                     "commit": manifest["commit"],
                     "version": manifest["version"],
                 }
