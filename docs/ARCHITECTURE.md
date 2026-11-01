@@ -1,17 +1,9 @@
-# Архитектура беты
+# Architecture
 
-React/TypeScript → nginx → FastAPI/SQLite. DNS-клиент → DoH либо DoT → DNS-шлюз → выделенный AdGuard Home. Для выбранного домена шлюз выдаёт IPv4 закреплённого выхода после подтверждения допуска агентом. AAAA и HTTPS/SVCB такого домена не содержат обходного назначения; обычные ответы, включая IPv6, сохраняются.
+React/TypeScript administrator UI -> FastAPI API -> SQLite. DNS users are credentials and filtering policies, not dashboard principals. Argon2id protects administrator passwords; server sessions use Secure/HttpOnly cookies and CSRF checks.
 
-HAProxy проксирует TLS по SNI без расшифровки. Допуск привязан к внешнему IPv4, действует 30 минут и продлевается запросами. За NAT допуск общий. Сам DNS-ключ идентифицирует аккаунт, но не даёт отличить устройства или пользователей за одним IP. IPv6-only доступ к проксируемым сервисам в этом выпуске не заявлен.
+The DNS gateway authenticates DoT/DoH credentials, asks a separate loopback AdGuard Home for filtering, and selectively rewrites supported domain answers to one configured ingress. A limited privileged agent maintains temporary client-IP permissions in the HTTPS forwarder. User HTTPS is passed through without TLS interception or installing a private CA on client devices.
 
-Веб-приложение работает без root. Root-агент читает состояние аккаунтов и изменяет только управляемые ACL, таблицу допусков nftables и выделенную конфигурацию фильтра. RPC доступен через закрытый Unix-сокет. Для HAProxy предусмотрен отдельный loopback health endpoint: просроченный heartbeat закрывает новые соединения Smart DNS, не затрагивая VPN-маршруты. Фактическое включение watchdog на VPS относится к ещё не завершённой приёмке.
+Network validation names and the installation's own names must resolve directly. Their protection takes priority over imported routing rules. Other IPv6 answers remain intact; routed AAAA/HTTPS/SVCB answers must not accidentally bypass the chosen forwarding route.
 
-Пароли: Argon2id, не более одной операции одновременно. DNS-секреты зашифрованы Fernet; master key хранится отдельно от SQLite и Git. Сеансы серверные, cookie Secure/HttpOnly/SameSite=Lax, изменяющие запросы проверяют CSRF и Origin. Приглашения и сеансы хранятся как хеши. Telegram использует Authorization Code Flow, PKCE S256, подпись JWKS, issuer/audience/expiry, state, nonce и привязку к браузеру. Привязка Telegram повторно проверяет действительность сеанса после обмена кода.
-
-SQLite использует WAL и таблицу schema_migrations. Код отказывается открывать более новую схему. Миграция альфы читает исходную базу без изменения, сохраняет идентификаторы и выдаёт старым профилям 30 дней совместимости. Смена ключа или отключение аккаунта прекращает старый доступ.
-
-Каталог импортирует выбранные списки domain-list-community и официальные CIDR Telegram. Regexp/keyword, которые нельзя безопасно преобразовать, отражаются как пропущенные. Неизвестные домены идут напрямую. Ручные правила имеют приоритет. Обновление сериализовано файловой блокировкой между CLI и API; при ошибке применения восстанавливаются только таблицы каталога, без отката аккаунтов и сеансов.
-
-Пул выбирает выход один раз для пары аккаунт/сервис. Drain сохраняет старые назначения. При недоступности выбирается другой разрешённый выход, иначе SERVFAIL. Дополнительные узлы принимают полные снимки допусков по mTLS, проверяют сроки, поколение конфигурации и фактический выходной IP. Их watchdog также требует свежий управляющий heartbeat. Адрес управления в бете задаётся по публичному входному IPv4, без DNS-ребиндинга.
-
-Подробные события ограничены сутками и 500 тысячами строк; агрегаты — семью днями. Переполнение очереди учитывается в диагностике. Для старого обычного DNS по IP персональная статистика не записывается: аккаунт устройства нельзя достоверно определить.
+DNS cannot identify physical devices or reroute hardcoded destination IPs. Multiple devices using one credential have common filtering and statistics. Proxy access is ultimately IP-scoped: users behind a shared public IP share that network admission boundary.

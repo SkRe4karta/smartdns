@@ -1,51 +1,27 @@
 # SmartDNS
 
-Личный Smart DNS для небольшой группы: зашифрованный DNS, фильтрация рекламы и выборочное HTTPS-проксирование через Финляндию.
+Self-hosted encrypted DNS, ad filtering and selective HTTPS forwarding. The project is preparing version **0.3.0-rc.1**; a release is usable only when its attached validation report passes the required checks.
 
-**0.2.0-beta.1** — аккаунтная бета. [Beta-релиз](https://github.com/OWNER/smartdns/releases/tag/v0.2.0-beta.1) содержит архив и контрольные суммы. Telegram Login выключен до настройки владельцем. По указанию владельца дополнительные ручные проверки перед выкладкой отменены; фактические результаты и непроверенные возможности перечислены в [отчёте](docs/VALIDATION.md). Альфа сохранена тегом v0.1.0-alpha.1.
+The administrator creates DNS users by username and distributes their connection settings. Recipients need no website account. One credential provides a DoT hostname, a DoH URL and an Apple configuration profile for multiple devices.
 
-## В бете
+## Capabilities and limits
 
-- Кабинеты и администрирование: приглашения на 72 часа, пароль, Telegram OIDC, сеансы, смена DNS-ключа.
-- Один секретный профиль DoH/DoT на несколько устройств; общая статистика аккаунта без подсчёта физических устройств.
-- Фильтрация AdGuard DNS Filter / HaGeZi Multi PRO и личные правила.
-- Каталог 47 сервисов, обновление с сохранением предыдущего каталога при ошибке.
-- Закрепление выхода за пользователем и сервисом, mTLS-управление дополнительными узлами. В рабочем пуле планируется один финский выход.
-- Подробная DNS-история за сутки, агрегаты за семь дней.
+- Admin-only dashboard; user status, filtering, aggregate activity and credential rotation.
+- AdGuard Home filtering; configurable installation address and domain.
+- Domain routing catalog including OpenAI/Codex, Twitch and Supercell HTTPS resources.
+- Daily validated catalog updates with rollback to the previous working version.
+- The bundled system routing policy includes categories not displayed in the dashboard. Policy sources are inspectable in the catalog manifests and code; dashboard visibility is not the complete policy.
 
-DNS не переносит произвольный IP-трафик. Telegram здесь означает веб-версию и HTTPS-ресурсы; MTProto, звонки и прямые соединения по IP требуют другого транспорта. DNS также не удаляет всю рекламу YouTube. Каталог описывает маршрутизацию, а успешная работа конкретного приложения подтверждается отдельно с клиентского устройства.
+DNS does not route connections to hardcoded IP addresses or arbitrary UDP/TCP traffic. A catalog entry is not a promise that every feature of a native app, game or call works. DNS cannot remove every advertisement, particularly ads sharing a content hostname. Account region and server IP reputation can affect access.
 
-## Разработка
+## Installation
 
-Нужны Python 3.14.4, Node 24.21.0 и uv 0.13.6. Зависимости закреплены в `uv.lock`, `requirements.txt` с хешами и `frontend/package-lock.json`.
+See [installation](docs/INSTALLATION.md), [configuration](docs/CONFIGURATION.md), [operations](docs/OPERATIONS.md) and [architecture](docs/ARCHITECTURE.md). Configure your own domain, public IPv4 and certificate. Examples use reserved addresses and are not live services.
 
-```sh
-uv sync --locked
-uv run ruff check src tests scripts
-uv run mypy
-uv run python scripts/beta_checks.py backend
-uv run python scripts/beta_checks.py integration
-cd frontend
-npm ci
-npm test
-npm run build
-npx playwright install chromium
-npm run test:e2e
-```
+Requires Linux with systemd, Python 3.14 and Node 24 for building the dashboard. Python and npm dependencies are locked. AdGuard Home, nginx and HAProxy are separate deployment components; shared-server installations must preserve existing listeners and routes.
 
-Browser-тесты создают временную базу и локальные тестовые аккаунты. Производственные ключи и данные им не нужны.
+## Development and releases
 
-## Сборка
+`main` contains releases; `develop` integrates changes; feature and fix branches use pull requests. See [release process](docs/RELEASE.md), [validation](docs/VALIDATION.md), [migration](docs/MIGRATION.md) and [security](SECURITY.md).
 
-После коммита и сборки frontend:
-
-```sh
-python scripts/build_release.py
-python scripts/check_install.py dist/*.tar.gz
-```
-
-Архив содержит wheel, скомпилированную панель, зависимости и манифест с SHA коммита и хешами файлов. Проверка устанавливает wheel в чистое окружение и выполняет миграцию альфы, резервное копирование и проверку SQLite. Это ещё не развёртывание на VPS. Архив с незакоммиченными изменениями не принимается как выпуск.
-
-[Архитектура](docs/ARCHITECTURE.md) · [Эксплуатация](docs/OPERATIONS.md) · [Приёмка](docs/VALIDATION.md) · [Выпуск](docs/RELEASE.md) · [Ревью](docs/REVIEW.md)
-
-Документация старой версии сохранена в `docs/alpha/`. Репозиторий публичный; базы, сертификаты, настройки бота и личные ссылки в Git не входят.
+Production configuration, databases, certificates, credentials and private connection links must never be committed. License: [MIT](LICENSE).

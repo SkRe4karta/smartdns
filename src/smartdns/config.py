@@ -10,8 +10,8 @@ from typing import Any
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path = Path("/opt/smartdns-smartdns-beta/data")
-    public_url: str = "https://dns.example.com"
-    public_ipv4: str = "203.0.113.10"
+    public_url: str = ""
+    public_ipv4: str = ""
     agent_socket: Path = Path("/run/smartdns/agent.sock")
     master_key_file: Path = Path("/opt/smartdns-smartdns-beta/secrets/master.key")
     telegram_file: Path = Path("/opt/smartdns-smartdns-beta/secrets/telegram.json")
@@ -70,4 +70,12 @@ class Settings:
                 p = Path(credential_dir) / filename
                 if p.exists():
                     raw[field] = p
-        return cls(**raw)
+        result = cls(**raw)
+        from urllib.parse import urlparse
+        import ipaddress
+        url = urlparse(result.public_url)
+        if url.scheme != "https" or not url.hostname or url.path not in ("", "/") or url.query or url.fragment:
+            raise ValueError("Configure public_url as an HTTPS origin")
+        if not ipaddress.ip_address(result.public_ipv4).is_global:
+            raise ValueError("Configure a real public_ipv4; documentation addresses are not deployments")
+        return result

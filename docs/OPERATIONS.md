@@ -1,32 +1,23 @@
-# Эксплуатация беты
+# Operations
 
-**Переключение рабочей VPS на бету пока не выполнено.** Команды ниже описывают компоненты приложения; старый сервис продолжает управляться по [инструкции альфы](alpha/OPERATIONS.md).
+Only administrators sign in to the dashboard. Create a DNS user by username, open its card and copy DoT/DoH settings or download the Apple profile. Send settings privately yourself. Recipients do not receive dashboard passwords or invitations.
 
-Конфигурация приложения — JSON, путь передаётся через `SMARTDNS_CONFIG`. Поля определены в `src/smartdns/config.py`. Ключи шифрования и Telegram должны находиться вне дерева выпуска. При systemd credentials приложение читает `master.key` и `telegram.json` из `CREDENTIALS_DIRECTORY`.
+Disabling a user revokes DNS access; rotating its key requires updating every device using that profile. Do not rotate keys just to change the username.
 
-Порядок подготовки чистого окружения:
+## Backup and restore
 
-1. Проверить SHA256 архива и его манифест, установить производственные зависимости с `--require-hashes` и wheel с `--no-deps`.
-2. Создать непривилегированного пользователя и закрытые каталоги данных. Выполнить `smartdns init` с окончательной конфигурацией. При существующей базе и отсутствующем master key инициализация запрещена: восстановить исходный ключ.
-3. Снять согласованную копию альфы, выполнить `smartdns migrate-alpha ПУТЬ`. Повторный запуск идемпотентен. Исходная база не меняется.
-4. Создать приглашение владельцу через `smartdns invite ID --recovery --output ЗАКРЫТЫЙ_ФАЙЛ`. Личные ссылки не выводить в общие логи и не коммитить.
-5. Первый каталог: `smartdns catalog-refresh --bootstrap`, только когда каталог пуст. Обновление рабочего каталога требует исправного агента: `smartdns catalog-refresh`.
-6. Настроить отдельный AdGuard Home, nginx, HAProxy и systemd. До переключения обязательны проверки конфигураций, сохранение старых VPN-маршрутов и фактическая проверка отката.
+Use the CLI SQLite backup operation; preserve the corresponding master key, private deployment configuration, certificate/ACME credentials and installed release manifest. Store backups outside Git with restricted permissions. Stop writers when restoring a coherent snapshot, restore the matching release, then reconcile the agent before reopening forwarding.
 
-CLI: `smartdns list`, `create ЛОГИН ИМЯ --output ФАЙЛ`, `invite ID --recovery --output ФАЙЛ`, `backup ФАЙЛ`. Файл вывода создаётся с правами 0600 и без перезаписи существующего файла. Сброс восстановления завершает сеансы и отменяет старые способы входа; DNS остаётся включённым, пока администратор отдельно не отключит аккаунт.
+## Catalog and filtering
 
-## Резервная копия и восстановление
+Updates are prepared from a pinned upstream commit, validated and activated together. On failure preserve the last working catalog. Built-in protected routing policy is not editable through the dashboard or API; its source remains available in the public project. It does not bypass ad filtering.
 
-`smartdns backup` использует SQLite backup API. Сохранять базу вместе с соответствующим master key, Telegram/acme-dns credentials, конфигурациями nginx/HAProxy/AGH и манифестом установленного выпуска. Закрытые копии не загружать в GitHub.
+## Certificates
 
-Для восстановления остановить пишущие компоненты, проверить `PRAGMA integrity_check`, вернуть согласованную базу и её ключ, выбрать соответствующий wheel/панель и только затем запускать службы. Откат схемы выполняется восстановлением резервной копии. Возврат старой базы отменяет изменения аккаунтов после снимка, поэтому приёмка отката обязательна до миграции знакомых.
+Automate renewal for your own domain with your selected ACME provider. Validate the certificate/key match before installation. Reload only components consuming the renewed certificate. No production DNS API credentials belong in this repository.
 
-## Сертификат
+## Diagnostics
 
-Wildcard получен через DNS-01/acme-dns. `scripts/renew_certificate.sh` использует отдельную конфигурацию Certbot; его нужно подключить к systemd timer. `install_certificate.sh` сверяет публичный ключ сертификата и private key, устанавливает их с правами root: smartdns-beta 0640 и перезагружает только необходимые компоненты. Автоматический timer и deploy hook на VPS ещё требуют установки и проверки.
+Check service health, certificate validity, authenticated DoT/DoH, filtering backend and agent readiness. Record timestamps, query outcomes and the relevant client source address, never raw DNS credentials. A mobile connection may obtain a new address after reconnecting.
 
-Telegram: BotFather → Login Widget → Allowed URLs, origin сайта и полный callback `/api/v1/auth/telegram/callback`. Нужны OIDC Client ID/Client Secret; токен Bot API их не заменяет. [Официальная документация](https://core.telegram.org/bots/telegram-login).
-
-Дополнительные узлы используют `smartdns-node`, сертификат сервера с IP SAN и отдельную доверенную клиентскую CA. Контрольный listener требует mTLS; loopback `/health` предназначен только для HAProxy watchdog. На основном сервере сертификаты клиента находятся в закрытом `agent-state/nodes/ID/`. Без сертификатов узел не проходит проверку и не включается.
-
-После самостоятельного заполнения `secrets/telegram.json` перезапусти `smartdns-api`: systemd передаёт секреты приложению при запуске. DNS-ключи и сеансы при обычном перезапуске API сохраняются. До реального входа Telegram остаётся непроверенной возможностью, даже если кнопка стала доступна.
+Do not interpret a successful website load as proof of native app or call support. Attach sanitized diagnostics and exact application/network versions when reporting failures.

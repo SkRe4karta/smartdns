@@ -1,30 +1,7 @@
-# Приёмка 0.2.0-beta.1
+# Validation status
 
-Статус: выкладка беты по указанию владельца от 1 ноября 2026 года. Владелец отменил дополнительные ручные проверки и прежние блокирующие условия приёмки. Непроверенные возможности ниже не объявляются подтверждёнными.
+Version 0.3.0-rc.1 is under preparation. This document is not evidence that checks have passed. The final release must attach actual commands, outcomes, commit/artifact identity and client verification results.
 
-| Область | Фактическое состояние |
-|---|---|
-| Backend/типы | Локальные тесты и mypy выполняются; окончательный результат фиксируется в CI конкретного коммита |
-| DoH GET/POST, DoT frames, неверные ключи | Покрыто локальными протокольными тестами |
-| Аккаунты/CSRF/инвайты/смена ключа/отзыв | Покрыто тестами; Telegram link проверяет живой сеанс |
-| Панель desktop/mobile | Пройдены browser-сценарии реального API с временной базой |
-| Каталог из реального источника | 47 сервисов, 3479 правил, 14 CIDR; upstream 1daade8c4bb957d21d1f5c09c2b050d699e8e96c |
-| Обновление с ошибкой | Тест восстановления каталога без отката аккаунтов |
-| Пул и mTLS узла | Изолированные тесты sticky/failover, реальный TLS с клиентским сертификатом |
-| Зависимости | Локально pip-audit/npm audit: известных производственных уязвимостей не найдено; повторяется в CI |
-| Секреты | Gitleaks 8.30.1: локальный исходный код без утечек; повторяется в CI |
-| Wildcard и продление | Сертификат выпущен; certbot renew --dry-run успешен; timer/deploy hook ещё не принят |
-| Установочный архив | Проверка чистой установки и миграции включается в release-check |
-| Реальный Telegram login/recovery | По решению владельца отложен; вход отключён до самостоятельной настройки. Не заявляется проверенным |
-| HAProxy watchdog | На изолированном стенде VPS: SIGSTOP закрывает новый HTTPS-прокси, обычный DNS работает, перезапуск восстанавливает доступ |
-| Клиент: Wi-Fi → mobile, несколько устройств, NAT | Ещё не проверено для беты |
-| 30 профилей / 60 клиентов, короткая нагрузка | 1800 успешных запросов за 62 с; ошибок и перезапусков нет, p99 25,77 мс. VPN-контейнеры активны без перезапусков |
-| Полное восстановление и фактический откат | Ещё не выполнены |
-| Приложения: AI, Spotify, YouTube, Discord, Telegram Web | Альфа подтверждена владельцем; для беты нужны новые проверки |
-| Commit → CI artifact → установленный SHA | Ещё не подтверждено, beta tag/release не опубликованы |
+Scheduled batches: privacy/history/artifact inspection; admin-only migration/access/policy scenarios; final CI/build/clean-install/upgrade/DNS and short client acceptance. No long load tests are required for this release.
 
-Прежнее требование закрыть все пункты до публикации отменено последним указанием владельца; бета выпускается с явно перечисленными ограничениями. Telegram исключён владельцем из обязательной приёмки этого выпуска и остаётся отключённым до его настройки. Непроверенные протоколы и приложения не объявляются работающими.
-
-По уточнению владельца от 1 ноября проверка беты ограничена 30 сценариями (23 Python, 6 frontend, 1 установка) и двумя минутами. Десятиминутные прогоны больше не являются условием выпуска. Ранее проваленный долгий прогон сохранён; исправление проверяется одним коротким прогоном. Telegram отложен владельцем.
-
-Исправленный CI-артефакт b832c5bae5816f244bc4b4f6df2fa1c45a263f44 прошёл реальную короткую проверку на VPS. Предыдущий длинный прогон провалился из-за незакрываемых SQLite-соединений, результат не считается успешным и сохранён отдельно. Исправление дополнительно подтверждено регрессионной проверкой дескрипторов.
+Client scenarios: Android Private DNS internet validation, desktop DoH, Apple profile installation, Twitch video and an actual Codex request over HTTPS/WebSocket. Native Supercell games and other apps are unverified unless an explicit device scenario passes. Existing historical snapshots are not newly validated releases.

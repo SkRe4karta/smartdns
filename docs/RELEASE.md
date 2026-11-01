@@ -1,17 +1,9 @@
-# Порядок выпуска
+# Release process
 
-`main` содержит выпущенные версии, `develop` — интеграцию. Изменения идут через feature/fix PR; стабилизация — `release/0.2.0-beta.1` → `main`. Требуются проверки backend, frontend, integration, security, release-check. Прямые изменения, force push и удаление main/develop запрещаются настройками GitHub; второй обязательный Approve не нужен.
+Use main for published versions, develop for integration and feature/fix branches for pull requests. Pin GitHub Actions by SHA, use minimal permissions and retain branch protection. Never publish an artifact built from a dirty working tree as a release.
 
-Перед merge проводится отдельная проверка кода с отчётом в PR. Нельзя утверждать, что собственный отчёт является одобрением независимого аккаунта.
+For 0.3.0-rc.1 schedule two small intermediate verification batches and one final batch. Required failures block release. Record which application/device scenarios were actually checked; do not replace missing client verification with server-only checks.
 
-После зелёного релизного PR и завершения приёмки:
+Build a commit-specific archive and SHA256SUMS; include the source SHA and file hashes in a manifest. Deploy that artifact, then compare its SHA/version to the installed instance. Keep production configuration and credentials outside it.
 
-1. Merge в main, CI конкретного main SHA собирает архив и проверяет установку wheel в новом venv, миграцию и копию SQLite.
-2. Скачать именно этот CI artifact, проверить SHA256SUMS, manifest.commit и отсутствие dirty. Снять согласованную производственную резервную копию.
-3. Развернуть проверенный архив, выполнить итоговую клиентскую и эксплуатационную проверку, сравнить установленный SHA и checksum с CI.
-4. Только после успеха создать тег v0.2.0-beta.1 и prerelease с тем же архивом, SHA256SUMS, инструкциями, отчётом приёмки и ссылками на CI/PR.
-5. Поддерживать старые профили 30 дней; начать с владельца. Не подключать знакомых до проверки владельца.
-
-Выпуск v0.2.0-beta.1 производится по явному указанию владельца без дополнительных ручных проверок. Инструкции альфы сохранены в docs/alpha/.
-
-Владелец отложил Telegram: допускается выпуск с выключенным Telegram Login и проверенным входом/восстановлением по паролю. В заметках выпуска Telegram должен быть отмечен как ненастроенный и не прошедший реальную проверку.
+Historical tags are archival source snapshots. After privacy-driven history rewriting their old binary assets and hashes must not be presented as verified builds of the rewritten commits. Remove affected old assets and invalidate stale links.
