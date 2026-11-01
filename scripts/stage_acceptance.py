@@ -80,7 +80,7 @@ def snapshot():
 async def main():
     os.umask(0o007)
     parser = argparse.ArgumentParser()
-    parser.add_argument("--seconds", type=int, choices=range(1, 91), default=90)
+    parser.add_argument("--seconds", type=int, choices=range(1, 61), default=60)
     args = parser.parse_args()
     settings = Settings.load()
     root = settings.data_dir.parent
