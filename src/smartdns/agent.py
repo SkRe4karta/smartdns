@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .catalog import Catalog
 from .config import Settings
 from .db import Database
-from .security import ACCOUNT_RE, normalize_domain, public_ipv4
+from .security import ACCOUNT_RE, EXIT_RE, normalize_domain, public_ipv4
 
 
 def atomic(path: Path, content: str) -> bool:
@@ -275,7 +275,7 @@ class AgentEngine:
                 raise
 
     async def grant(self, account_id: str, ip: str, exit_id: str, generation: int) -> bool:
-        if not ACCOUNT_RE.fullmatch(account_id):
+        if not ACCOUNT_RE.fullmatch(account_id) or not EXIT_RE.fullmatch(exit_id):
             return False
         ip = public_ipv4(ip)
         async with self.lock:
@@ -305,6 +305,8 @@ class AgentEngine:
         from urllib.parse import urlparse
 
         exit_id = exit_row["id"]
+        if not isinstance(exit_id, str) or not EXIT_RE.fullmatch(exit_id):
+            return {"ready": False}
         failed = {"ready": False, "ingress_ip": exit_row["ingress_ip"], "egress_ip": None}
         url = exit_row.get("control_url")
         if not url:
@@ -408,7 +410,7 @@ class Grant(BaseModel):
     model_config = ConfigDict(extra="forbid")
     account_id: str = Field(max_length=32)
     ip: str = Field(max_length=45)
-    exit_id: str = Field(max_length=32)
+    exit_id: str = Field(pattern=r"^[a-z][a-z0-9-]{0,31}$")
     generation: int = Field(ge=1)
 
 

@@ -16,6 +16,7 @@ from cryptography.fernet import Fernet
 PASSWORDS = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=1)
 DUMMY_HASH = PASSWORDS.hash(secrets.token_urlsafe(32))
 PASSWORD_LOCK = threading.BoundedSemaphore(1)
+EXIT_RE = re.compile(r"[a-z][a-z0-9-]{0,31}\Z")
 ACCOUNT_RE = re.compile(r"u[0-9a-f]{12}\Z")
 DNS_KEY_RE = re.compile(r"k[a-z2-7]{52}\Z")
 LOGIN_RE = re.compile(r"[a-z0-9][a-z0-9_.-]{2,39}\Z")
