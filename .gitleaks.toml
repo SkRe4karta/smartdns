@@ -1,0 +1,3 @@
+title = "Zelyonka source secret scanning"
+[extend]
+useDefault = true

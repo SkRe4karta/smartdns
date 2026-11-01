@@ -19,3 +19,15 @@ owner-connection.json
 *connection*.json
 *credentials*
 *results.json
+node_modules/
+frontend/dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage*
+htmlcov/
+*.egg-info/
+*.tsbuildinfo
+test-results/
+playwright-report/
+dist/
