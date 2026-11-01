@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import {
   Activity,
   ArrowDownToLine,
-  ArrowUpRight,
   Check,
   CheckCircle2,
   ChevronRight,
@@ -22,7 +21,6 @@ import {
   Settings2,
   ShieldCheck,
   ShieldOff,
-  SlidersHorizontal,
   Users,
   Wifi,
   X,
@@ -31,15 +29,7 @@ import { api, APIError, setCSRF, number, date, type User } from "./api";
 import "./style.css";
 
 type Notice = (message: string, error?: boolean) => void;
-type View =
-  | "overview"
-  | "connect"
-  | "filtering"
-  | "catalog"
-  | "profile"
-  | "users"
-  | "exits"
-  | "system";
+type View = "overview" | "catalog" | "profile" | "users" | "system";
 const nav: {
   id: View;
   label: string;
@@ -47,13 +37,10 @@ const nav: {
   admin?: boolean;
 }[] = [
   { id: "overview", label: "Обзор", icon: LayoutDashboard },
-  { id: "connect", label: "Подключение", icon: Wifi },
-  { id: "filtering", label: "Фильтрация", icon: SlidersHorizontal },
+  { id: "users", label: "Пользователи", icon: Users },
   { id: "catalog", label: "Каталог сервисов", icon: Globe2 },
-  { id: "profile", label: "Профиль", icon: Settings2 },
-  { id: "users", label: "Пользователи", icon: Users, admin: true },
-  { id: "exits", label: "Выходные IP", icon: Server, admin: true },
-  { id: "system", label: "Система", icon: Activity, admin: true },
+  { id: "system", label: "Система", icon: Activity },
+  { id: "profile", label: "Безопасность", icon: Settings2 },
 ];
 
 function Brand() {
@@ -148,164 +135,53 @@ function Field({
 }
 
 function Auth({ onLogin, notice }: { onLogin: () => void; notice: Notice }) {
-  const setup = location.pathname === "/setup";
-  const [token] = useState(() => {
-    const fragment = location.hash.slice(1);
-    if (fragment) {
-      sessionStorage.setItem("zd_setup", fragment);
-      history.replaceState(null, "", "/setup");
-    }
-    return sessionStorage.getItem("zd_setup") || "";
-  });
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [invite, setInvite] = useState<any>(null);
-  const [telegram, setTelegram] = useState(false);
-  useEffect(() => {
-    api("/auth/options")
-      .then((d) => setTelegram(d.telegram))
-      .catch(() => {});
-    if (setup && token)
-      api("/auth/invitation", "POST", { token })
-        .then((d) => {
-          setInvite(d);
-          setLogin(d.login);
-        })
-        .catch((e) => notice(e.message, true));
-    if (new URLSearchParams(location.search).get("error") === "telegram")
-      notice(
-        "Не удалось войти через Telegram. Повтори вход или используй пароль.",
-        true,
-      );
-  }, []);
-  async function submit(e: React.SubmitEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      await api(
-        setup ? "/auth/setup" : "/auth/login",
-        "POST",
-        setup ? { token, password } : { login, password },
-      );
-      sessionStorage.removeItem("zd_setup");
-      history.replaceState(null, "", "/app");
-      onLogin();
-    } catch (e) {
-      notice((e as Error).message, true);
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function telegramLogin() {
-    setBusy(true);
-    try {
-      const d = await api(
-        "/auth/telegram/start",
-        "POST",
-        setup ? { invite: token } : {},
-      );
-      location.assign(d.url);
-    } catch (e) {
-      notice((e as Error).message, true);
-      setBusy(false);
-    }
-  }
   return (
-    <main className="auth-page">
-      <div className="auth-intro">
+    <div className="auth-page">
+      <div className="auth-card">
         <Brand />
-        <span className="version-chip">БЕТА · 0.2</span>
-        <h1>
-          Свободнее интернет.
-          <br />
-          <em>Спокойнее каждый день.</em>
-        </h1>
-        <p>
-          Личный DNS с фильтрацией рекламы и доступом к зарубежным сервисам
-          через Финляндию.
-        </p>
-        <div className="auth-benefits">
-          <span>
-            <ShieldCheck /> Меньше рекламы и трекеров
-          </span>
-          <span>
-            <Globe2 /> Один профиль для твоих устройств
-          </span>
-          <span>
-            <Wifi /> Без ручной активации сети
-          </span>
-        </div>
-        <div className="auth-foot">
-          ЗЕЛЁНКА DNS <span>© 2026</span>
-        </div>
-      </div>
-      <section className="auth-form card">
-        <div className="small-icon">
-          <LockKeyhole />
-        </div>
-        <h2>{setup ? "Добро пожаловать" : "Вход в кабинет"}</h2>
-        <p>
-          {setup
-            ? invite
-              ? `${invite.name}, настрой доступ к своему DNS.`
-              : "Открой приглашение от администратора."
-            : "Рады видеть тебя снова. Твои настройки на месте."}
-        </p>
-        <form onSubmit={submit}>
+        <h1>Панель администратора</h1>
+        <p>Управление пользователями и DNS.</p>
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setBusy(true);
+            try {
+              await api("/auth/login", "POST", { login, password });
+              setPassword("");
+              onLogin();
+            } catch (e) {
+              notice((e as Error).message, true);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
           <Field label="Логин">
             <input
               autoComplete="username"
               value={login}
               onChange={(e) => setLogin(e.target.value)}
-              readOnly={setup}
               required
-              aria-label="Логин"
             />
           </Field>
-          <Field label={setup ? "Придумай пароль" : "Пароль"}>
+          <Field label="Пароль">
             <input
               type="password"
-              autoComplete={setup ? "new-password" : "current-password"}
-              minLength={setup ? 12 : 1}
-              maxLength={256}
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              aria-label="Пароль"
             />
           </Field>
-          {setup && (
-            <small>
-              Не менее 12 символов. После настройки этот профиль можно
-              использовать на нескольких устройствах.
-            </small>
-          )}
-          <button
-            className="primary full"
-            disabled={busy || (setup && !invite)}
-          >
-            {busy ? <Loader2 className="spin" size={18} /> : null}
-            {setup ? "Создать пароль и войти" : "Войти"}
-            <ArrowUpRight size={17} />
+          <button className="primary" disabled={busy}>
+            Войти
           </button>
         </form>
-        <div className="separator">или</div>
-        <button
-          className="secondary full"
-          onClick={telegramLogin}
-          disabled={busy || !telegram || (setup && !invite)}
-        >
-          Войти через Telegram
-        </button>
-        {!telegram && (
-          <small>Telegram Login пока не настроен администратором.</small>
-        )}
-        <p className="auth-help">
-          Для восстановления доступа обратись к администратору сервиса.
-        </p>
-      </section>
-    </main>
+      </div>
+    </div>
   );
 }
 
@@ -313,7 +189,8 @@ function Overview({ notice, user }: { notice: Notice; user: User }) {
   const [days, setDays] = useState(1);
   const { data, loading } = useData("/me/stats?days=" + days, notice);
   if (loading) return <Spinner />;
-  if (!data) return <Empty>Не удалось загрузить данные. Обнови страницу.</Empty>;
+  if (!data)
+    return <Empty>Не удалось загрузить данные. Обнови страницу.</Empty>;
   const max = Math.max(1, ...data.buckets.map((b: any) => b.total));
   const points = data.buckets
     .map(
@@ -335,7 +212,7 @@ function Overview({ notice, user }: { notice: Notice; user: User }) {
       hint: "Реклама и нежелательные домены",
     },
     {
-      label: "Через Финляндию",
+      label: "Через прокси",
       value: data.totals.proxied,
       icon: Globe2,
       hint: "Ответы с направлением через сервис",
@@ -542,128 +419,85 @@ function Overview({ notice, user }: { notice: Notice; user: User }) {
   );
 }
 
-function Connect({ notice }: { notice: Notice }) {
-  const [revision, setRevision] = useState(0);
-  const { data, loading } = useData("/me/connection", notice, revision);
-  const [platform, setPlatform] = useState("android");
-  const [busy, setBusy] = useState(false);
-  async function rotate() {
-    if (
-      !confirm(
-        "Сменить DNS-ключ? Настройки потребуется обновить на всех устройствах. Старые адреса перестанут работать.",
-      )
-    )
-      return;
-    setBusy(true);
-    try {
-      await api("/me/rotate-key", "POST");
-      setRevision((x) => x + 1);
-      notice("Ключ изменён. Обнови настройки устройств.");
-    } catch (e) {
-      notice((e as Error).message, true);
-    } finally {
-      setBusy(false);
-    }
-  }
+function ConnectionCards({
+  id,
+  notice,
+  revision,
+}: {
+  id: string;
+  notice: Notice;
+  revision: number;
+}) {
+  const { data, loading } = useData(
+    "/admin/users/" + id + "/connection",
+    notice,
+    revision,
+  );
   if (loading) return <Spinner />;
-  if (!data) return <Empty>Не удалось загрузить данные. Обнови страницу.</Empty>;
+  if (!data) return <Empty>Подключения недоступны</Empty>;
   return (
-    <>
-      <div className="section-title">
-        <h2>Один DNS. Все твои устройства.</h2>
-        <p>
-          Установи настройку один раз. При смене сети допуск обновляется
-          автоматически.
-        </p>
-      </div>
-      <div className="platforms">
-        {[
-          ["android", "Android"],
-          ["desktop", "ПК и роутер"],
-          ["apple", "iPhone и Mac"],
-        ].map(([id, label]) => (
-          <button
-            key={id}
-            className={platform === id ? "selected" : ""}
-            onClick={() => setPlatform(id)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      <section className="card setup-card">
-        <Pill>ЛИЧНАЯ НАСТРОЙКА · ВЕРСИЯ {data.version}</Pill>
-        <h3>
-          {platform === "android"
-            ? "Частный DNS на Android"
-            : platform === "apple"
-              ? "Профиль для Apple"
-              : "DNS over HTTPS"}
-        </h3>
-        <p>
-          {platform === "android"
-            ? "Настройки → Сеть и интернет / Подключения → Частный DNS → Имя хоста провайдера."
-            : platform === "apple"
-              ? "Скачай профиль, открой настройки устройства и подтверди установку DNS «SmartDNS»."
-              : "Добавь пользовательский DNS over HTTPS в настройках системы, браузера или совместимого роутера."}
-        </p>
-        <label className="code-label">
-          {platform === "android" ? "ИМЯ ХОСТА DOT" : "АДРЕС DOH"}
-        </label>
-        <div className="code-box">
-          <code>{platform === "android" ? data.dot : data.doh}</code>
-          <Copy
-            value={platform === "android" ? data.dot : data.doh}
-            notice={notice}
-          />
-        </div>
-        {platform === "apple" && (
-          <a className="primary inline" href="/api/v1/me/profile.mobileconfig">
-            <ArrowDownToLine size={17} /> Скачать профиль Apple
-          </a>
-        )}
-        {platform === "desktop" && (
-          <p className="hint">
-            Если роутер запрашивает bootstrap IP: <code>{data.bootstrap}</code>.
-            Используй режим только выбранного защищённого DNS.
-          </p>
-        )}
-        <div className="info-box">
-          <ShieldCheck size={21} />
-          <div>
-            <b>Одна настройка для нескольких устройств</b>
-            <p>
-              Используй её на телефоне, компьютере и роутере. Статистика и
-              фильтры будут общими. Сохраняй личный адрес у себя.
-            </p>
+    <section className="card connection-cards">
+      <h3>Подключения · версия ключа {data.version}</h3>
+      <p>
+        Один DNS-профиль для всех устройств. Ссылки и файл выдаёт администратор.
+      </p>
+      {[
+        {
+          title: "Android",
+          hint: "Подключения → Другие настройки соединения → Частный DNS → Имя хоста провайдера.",
+          value: data.dot,
+        },
+        {
+          title: "ПК и совместимые роутеры",
+          hint: "Добавь адрес DNS over HTTPS. Bootstrap IP: " + data.bootstrap,
+          value: data.doh,
+        },
+      ].map((c) => (
+        <div className="connection-block" key={c.title}>
+          <h4>{c.title}</h4>
+          <p>{c.hint}</p>
+          <div className="code-box">
+            <code>{c.value}</code>
+            <Copy value={c.value} notice={notice} />
           </div>
         </div>
-      </section>
-      <section className="card danger-zone">
-        <div>
-          <h3>Сменить DNS-ключ</h3>
-          <p>
-            Если настройка попала к посторонним. Все устройства потребуется
-            настроить заново.
-          </p>
-        </div>
-        <button className="secondary" disabled={busy} onClick={rotate}>
-          <RefreshCw size={16} /> Сменить ключ
-        </button>
-      </section>
-    </>
+      ))}
+      <div className="connection-block">
+        <h4>iPhone и MacBook</h4>
+        <p>
+          Общий профиль DNS over HTTPS. Скачай файл и передай владельцу
+          устройства.
+        </p>
+        <a
+          className="primary inline"
+          href={"/api/v1/admin/users/" + id + "/profile.mobileconfig"}
+        >
+          <ArrowDownToLine size={17} /> Скачать .mobileconfig
+        </a>
+      </div>
+    </section>
   );
 }
 
 function Filtering({
   notice,
+  accountId,
   onChange,
 }: {
   notice: Notice;
   onChange: () => void;
+  accountId: string;
 }) {
+  const base = "/admin/users/" + accountId;
   const [revision, setRevision] = useState(0);
-  const { data, loading } = useData("/me/filtering", notice, revision);
+  const result = useData(base, notice, revision);
+  const loading = result.loading;
+  const data = result.data
+    ? {
+        enabled: !!result.data.user.filtering,
+        exceptions: result.data.user.exceptions,
+      }
+    : null;
   const [domain, setDomain] = useState("");
   const [action, setAction] = useState("allow");
   const [busy, setBusy] = useState(false);
@@ -681,12 +515,13 @@ function Filtering({
     }
   }
   if (loading) return <Spinner />;
-  if (!data) return <Empty>Не удалось загрузить данные. Обнови страницу.</Empty>;
+  if (!data)
+    return <Empty>Не удалось загрузить данные. Обнови страницу.</Empty>;
   return (
     <>
       <div className="section-title">
         <h2>Меньше рекламы и трекеров</h2>
-        <p>Изменения действуют на все устройства с твоей DNS-настройкой.</p>
+        <p>Изменения действуют на все устройства пользователя.</p>
       </div>
       <section className="card toggle-card">
         <div className="small-icon">
@@ -705,7 +540,7 @@ function Filtering({
           className={"switch " + (data.enabled ? "on" : "")}
           disabled={busy}
           onClick={() =>
-            save("/me/filtering", "PUT", { enabled: !data.enabled })
+            save(base + "/filtering", "PUT", { enabled: !data.enabled })
           }
         >
           <span />
@@ -723,8 +558,8 @@ function Filtering({
           className="inline-form"
           onSubmit={(e) => {
             e.preventDefault();
-            void save("/me/exceptions", "POST", { domain, action }).then(() =>
-              setDomain(""),
+            void save(base + "/exceptions", "POST", { domain, action }).then(
+              () => setDomain(""),
             );
           }}
         >
@@ -771,7 +606,7 @@ function Filtering({
                     disabled={busy}
                     onClick={() =>
                       save(
-                        "/me/exceptions/" + encodeURIComponent(r.domain),
+                        base + "/exceptions/" + encodeURIComponent(r.domain),
                         "DELETE",
                       )
                     }
@@ -819,7 +654,8 @@ function ServiceCatalog({ notice, admin }: { notice: Notice; admin: boolean }) {
     }
   }
   if (loading) return <Spinner />;
-  if (!data) return <Empty>Не удалось загрузить данные. Обнови страницу.</Empty>;
+  if (!data)
+    return <Empty>Не удалось загрузить данные. Обнови страницу.</Empty>;
   const services = data.services.filter((s: any) =>
     (s.name + " " + s.category).toLowerCase().includes(search.toLowerCase()),
   );
@@ -1085,35 +921,6 @@ function Profile({
           </form>
         </section>
         <section className="card">
-          <div className="card-head">
-            <h3>Telegram</h3>
-            <Pill tone={user.telegram_linked ? "green" : "muted"}>
-              {user.telegram_linked ? "Привязан" : "Не привязан"}
-            </Pill>
-          </div>
-          <p className="subtle">
-            Используй Telegram для быстрого входа в этот же аккаунт.
-          </p>
-          <button
-            className="secondary"
-            onClick={async () => {
-              try {
-                if (user.telegram_linked) {
-                  await api("/auth/telegram", "DELETE");
-                  onChange();
-                  notice("Telegram отвязан");
-                } else {
-                  const d = await api("/auth/telegram/start", "POST", {});
-                  location.assign(d.url);
-                }
-              } catch (e) {
-                notice((e as Error).message, true);
-              }
-            }}
-          >
-            {user.telegram_linked ? "Отвязать Telegram" : "Привязать Telegram"}
-          </button>
-          <div className="divider" />
           <h3>Сеансы кабинета</h3>
           <p className="subtle">
             Заверши вход на других компьютерах и браузерах. DNS на устройствах
@@ -1138,338 +945,264 @@ function Profile({
   );
 }
 
-function AdminUsers({ notice }: { notice: Notice }) {
+function UserCard({
+  id,
+  notice,
+  onClose,
+  onChange,
+}: {
+  id: string;
+  notice: Notice;
+  onClose: () => void;
+  onChange: () => void;
+}) {
   const [revision, setRevision] = useState(0);
-  const { data, loading } = useData("/admin/users", notice, revision);
-  const [search, setSearch] = useState("");
-  const [login, setLogin] = useState("");
-  const [name, setName] = useState("");
-  const [link, setLink] = useState("");
+  const [days, setDays] = useState(1);
   const [busy, setBusy] = useState(false);
-  async function create(e: React.SubmitEvent<HTMLFormElement>) {
-    e.preventDefault();
+  const { data, loading } = useData(
+    "/admin/users/" + id + "?days=" + days,
+    notice,
+    revision,
+  );
+  async function action(path: string, method: string, body?: unknown) {
     setBusy(true);
     try {
-      const d = await api("/admin/users", "POST", { login, name });
-      setLink(d.setup_url);
-      setLogin("");
-      setName("");
+      await api("/admin/users/" + id + path, method, body);
       setRevision((x) => x + 1);
-      notice("Пользователь создан");
+      onChange();
+      notice("Изменения сохранены");
     } catch (e) {
       notice((e as Error).message, true);
     } finally {
       setBusy(false);
     }
   }
-  async function act(id: string, action: string, enabled?: boolean) {
-    try {
-      if (action === "status") {
-        await api("/admin/users/" + id, "PATCH", { enabled });
-      } else if (action === "recovery") {
-        const d = await api("/admin/users/" + id + "/recovery", "POST");
-        setLink(d.setup_url);
-      } else {
-        if (
-          !confirm(
-            "Сменить DNS-ключ пользователя? Ему потребуется обновить настройки всех устройств.",
-          )
-        )
-          return;
-        await api("/admin/users/" + id + "/rotate-key", "POST");
-      }
-      setRevision((x) => x + 1);
-      notice("Изменения сохранены");
-    } catch (e) {
-      notice((e as Error).message, true);
-    }
-  }
-  if (loading) return <Spinner />;
-  if (!data) return <Empty>Не удалось загрузить данные. Обнови страницу.</Empty>;
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", key);
+    return () => {
+      document.body.style.overflow = previous;
+      document.removeEventListener("keydown", key);
+    };
+  }, [onClose]);
+  return (
+    <div
+      className="user-dialog-backdrop"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-label="Пользователь"
+        className="user-dialog"
+      >
+        <button autoFocus className="secondary dialog-close" onClick={onClose}>
+          <X size={18} /> Закрыть
+        </button>
+        {loading ? (
+          <Spinner />
+        ) : !data ? (
+          <Empty>Пользователь недоступен</Empty>
+        ) : (
+          <>
+            <div className="section-title">
+              <h2>{data.user.login}</h2>
+              <Pill tone={data.user.status === "active" ? "green" : "amber"}>
+                {data.user.status === "active" ? "Активен" : "Отключён"}
+              </Pill>
+              <p>Последний DNS-запрос: {date(data.user.last_dns)}</p>
+            </div>
+            <div className="card">
+              <div className="card-head">
+                <h3>DNS-активность</h3>
+                <select
+                  aria-label="Период статистики"
+                  value={days}
+                  onChange={(e) => setDays(Number(e.target.value))}
+                >
+                  <option value={1}>Сутки</option>
+                  <option value={7}>Неделя</option>
+                </select>
+              </div>
+              <p>
+                Запросы: {number(data.stats.totals.total)} · блокировки:{" "}
+                {number(data.stats.totals.blocked)} · ошибки:{" "}
+                {number(data.stats.totals.errors)}
+              </p>
+              <div className="user-bars" aria-label="График запросов">
+                {data.stats.buckets.map((b: any) => (
+                  <span
+                    key={b.at}
+                    title={date(b.at) + ": " + number(b.total)}
+                    style={{
+                      height:
+                        Math.max(
+                          3,
+                          (80 * b.total) /
+                            Math.max(
+                              1,
+                              ...data.stats.buckets.map((x: any) => x.total),
+                            ),
+                        ) + "px",
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+            <ConnectionCards id={id} notice={notice} revision={revision} />
+            <Filtering accountId={id} notice={notice} onChange={onChange} />
+            <section className="card danger-zone">
+              <button
+                className="secondary"
+                disabled={busy}
+                onClick={() =>
+                  action("", "PATCH", {
+                    enabled: data.user.status !== "active",
+                  })
+                }
+              >
+                {data.user.status === "active"
+                  ? "Отключить пользователя"
+                  : "Включить пользователя"}
+              </button>
+              <button
+                className="secondary"
+                disabled={busy}
+                onClick={() => {
+                  if (
+                    confirm(
+                      "Сменить DNS-ключ? Все устройства потребуется настроить заново. Старые адреса перестанут работать.",
+                    )
+                  )
+                    void action("/rotate-key", "POST");
+                }}
+              >
+                <RefreshCw size={16} /> Сменить DNS-ключ
+              </button>
+            </section>
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
+function AdminUsers({ notice }: { notice: Notice }) {
+  const [revision, setRevision] = useState(0);
+  const { data, loading } = useData("/admin/users", notice, revision);
+  const [username, setUsername] = useState("");
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   return (
     <>
-      <div className="section-title flex">
-        <div>
-          <h2>Пользователи</h2>
-          <p>Создавай аккаунты и выдавай личные приглашения.</p>
-        </div>
-        <Pill>
-          {data.users.filter((u: any) => u.status !== "disabled").length} /{" "}
-          {data.limit}
-        </Pill>
+      <div className="section-title">
+        <h2>Пользователи</h2>
+        <p>Создай DNS-профиль и передай подключения лично.</p>
       </div>
       <section className="card">
         <h3>Новый пользователь</h3>
-        <form className="inline-form" onSubmit={create}>
+        <form
+          className="inline-form"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setBusy(true);
+            try {
+              const r = await api("/admin/users", "POST", { username });
+              setUsername("");
+              setRevision((x) => x + 1);
+              setSelected(r.id);
+              notice("DNS-профиль активен");
+            } catch (e) {
+              notice((e as Error).message, true);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
           <input
-            aria-label="Логин нового пользователя"
-            placeholder="Логин, латиница"
-            value={login}
-            onChange={(e) => setLogin(e.target.value)}
-            required
+            aria-label="Username нового пользователя"
+            placeholder="Username"
+            pattern="[A-Za-z0-9._-]{3,40}"
             minLength={3}
-          />
-          <input
-            aria-label="Имя нового пользователя"
-            placeholder="Имя"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+            maxLength={40}
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
             required
           />
           <button className="primary" disabled={busy}>
             <Plus size={17} /> Создать
           </button>
         </form>
-        {link && (
-          <div className="issued-link">
-            <p>
-              Ссылка первоначальной настройки · действует 72 часа · одноразовая
-            </p>
-            <div className="code-box">
-              <code>{link}</code>
-              <Copy value={link} notice={notice} />
-            </div>
-            <small>Скопируй ссылку и передай получателю лично.</small>
-          </div>
-        )}
       </section>
       <section className="card">
         <div className="search-box">
-          <Search size={17} />
+          <Search size={18} />
           <input
+            aria-label="Найти пользователя"
             placeholder="Найти пользователя"
-            aria-label="Поиск пользователя"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Пользователь</th>
-                <th>Доступ</th>
-                <th>Активность DNS</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.users
-                .filter((u: any) =>
-                  (u.name + " " + u.login)
-                    .toLowerCase()
-                    .includes(search.toLowerCase()),
-                )
-                .map((u: any) => (
-                  <tr key={u.id}>
-                    <td>
-                      <b>{u.name}</b>
-                      <small className="block">
-                        {u.login} ·{" "}
-                        {u.role === "admin" ? "Администратор" : "Пользователь"}
-                      </small>
-                    </td>
-                    <td>
-                      <Pill
-                        tone={
-                          u.status === "active"
-                            ? "green"
-                            : u.status === "invited"
-                              ? "amber"
-                              : "muted"
-                        }
-                      >
-                        {
-                          {
-                            active: "Активен",
-                            invited: "Приглашён",
-                            disabled: "Отключён",
-                          }[u.status as string]
-                        }
-                      </Pill>
-                    </td>
-                    <td className="subtle">{date(u.last_dns)}</td>
-                    <td>
-                      <div className="row-actions">
-                        <button
-                          className="text-button"
-                          onClick={() =>
-                            act(u.id, "status", u.status === "disabled")
-                          }
-                        >
-                          {u.status === "disabled" ? "Включить" : "Отключить"}
-                        </button>
-                        <button
-                          className="text-button"
-                          disabled={u.status === "disabled"}
-                          onClick={() => act(u.id, "recovery")}
-                        >
-                          Новая ссылка
-                        </button>
-                        <button
-                          className="text-button"
-                          onClick={() => act(u.id, "rotate")}
-                        >
-                          Сброс DNS
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </>
-  );
-}
-
-function Exits({ notice }: { notice: Notice }) {
-  const [revision, setRevision] = useState(0);
-  const { data, loading } = useData("/admin/exits", notice, revision);
-  const [form, setForm] = useState({
-    id: "",
-    name: "",
-    ingress_ip: "",
-    egress_ip: "",
-    country: "FI",
-    control_url: "",
-  });
-  if (loading) return <Spinner />;
-  if (!data) return <Empty>Не удалось загрузить данные. Обнови страницу.</Empty>;
-  return (
-    <>
-      <div className="section-title">
-        <h2>Выходные IP</h2>
-        <p>
-          Выход закрепляется за пользователем и сервисом. Новый узел не меняет
-          действующие назначения.
-        </p>
-      </div>
-      <div className="service-grid">
-        {data.exits.map((e: any) => (
-          <article className="card" key={e.id}>
-            <div className="card-head">
-              <div className="small-icon">
-                <Server />
-              </div>
-              <Pill tone={!e.enabled ? "muted" : e.healthy ? "green" : "red"}>
-                {!e.enabled ? "Отключён" : e.healthy ? "Готов" : "Недоступен"}
-              </Pill>
-            </div>
-            <h3>{e.name}</h3>
-            <p className="subtle">
-              {e.country} · {e.id}
+        {loading ? (
+          <Spinner />
+        ) : data ? (
+          <>
+            <p>
+              {data.users.length} / {data.limit}
             </p>
-            <div className="status-line">
-              <span>Вход</span>
-              <code>{e.ingress_ip}</code>
-            </div>
-            <div className="status-line">
-              <span>Выход</span>
-              <code>{e.egress_ip}</code>
-            </div>
-            <div className="row-actions spaced">
-              <button className="text-button" onClick={async () => {
-                try {
-                  const result = await api("/admin/exits/" + e.id + "/check", "POST");
-                  setRevision(x => x + 1);
-                  notice(result.healthy ? "Агент и выходной IP проверены" : "Узел не прошёл проверку", !result.healthy);
-                } catch (err) { notice((err as Error).message, true); }
-              }}><RefreshCw size={15}/> Проверить узел</button>
-
-              <button
-                className="secondary"
-                onClick={async () => {
-                  if (
-                    e.enabled &&
-                    !confirm(
-                      "Отключить выход? Если других готовых выходов нет, перенаправляемые сервисы станут недоступны.",
-                    )
-                  )
-                    return;
-                  try {
-                    await api("/admin/exits/" + e.id, "PATCH", {
-                      enabled: !e.enabled,
-                      draining: !!e.draining,
-                      allowed_services: e.allowed_services,
-                    });
-                    setRevision((x) => x + 1);
-                  } catch (err) {
-                    notice((err as Error).message, true);
-                  }
-                }}
-              >
-                {e.enabled ? "Отключить" : "Включить"}
-              </button>
-              <button
-                className="text-button"
-                onClick={async () => {
-                  try {
-                    await api("/admin/exits/" + e.id, "PATCH", {
-                      enabled: !!e.enabled,
-                      draining: !e.draining,
-                      allowed_services: e.allowed_services,
-                    });
-                    setRevision((x) => x + 1);
-                  } catch (err) {
-                    notice((err as Error).message, true);
-                  }
-                }}
-              >
-                {e.draining
-                  ? "Принимать новые назначения"
-                  : "Вывести из новых назначений"}
-              </button>
-            </div>
-          </article>
-        ))}
-      </div>
-      <section className="card">
-        <h3>Добавить выход</h3>
-        <p className="subtle">
-          Регистрирует существующий адрес. Серверы и IP автоматически не
-          приобретаются. Новый выход создаётся отключённым.
-        </p>
-        <form
-          className="exit-form"
-          onSubmit={async (ev) => {
-            ev.preventDefault();
-            try {
-              await api("/admin/exits", "POST", {
-                ...form,
-                control_url: form.control_url || null,
-              });
-              setRevision((x) => x + 1);
-              notice(
-                "Выход добавлен. Настрой сертификаты агента и проверку узла по инструкции.",
-              );
-            } catch (err) {
-              notice((err as Error).message, true);
-            }
-          }}
-        >
-          {[
-            ["id", "Идентификатор"],
-            ["name", "Название"],
-            ["ingress_ip", "Входной IPv4"],
-            ["egress_ip", "Выходной IPv4"],
-            ["country", "Страна, ISO"],
-            ["control_url", "HTTPS-адрес агента"],
-          ].map(([k, label]) => (
-            <Field key={k} label={label}>
-              <input
-                value={form[k as keyof typeof form]}
-                onChange={(e) => setForm({ ...form, [k]: e.target.value })}
-                required={k !== "control_url"}
-              />
-            </Field>
-          ))}
-          <button className="primary">
-            <Plus size={17} /> Добавить отключённым
-          </button>
-        </form>
+            <table>
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Доступ</th>
+                  <th>Активность DNS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.users
+                  .filter((u: any) => u.login.includes(search.toLowerCase()))
+                  .map((u: any) => (
+                    <tr key={u.id}>
+                      <td>
+                        <button
+                          className="user-link"
+                          onClick={() => setSelected(u.id)}
+                        >
+                          {u.login}
+                        </button>
+                        {u.role === "admin" && <small> Администратор</small>}
+                      </td>
+                      <td>
+                        <Pill tone={u.status === "active" ? "green" : "amber"}>
+                          {u.status === "active" ? "Активен" : "Отключён"}
+                        </Pill>
+                      </td>
+                      <td>{date(u.last_dns)}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </>
+        ) : (
+          <Empty>Не удалось загрузить пользователей</Empty>
+        )}
       </section>
+      {selected && (
+        <UserCard
+          key={selected}
+          id={selected}
+          notice={notice}
+          onClose={() => setSelected(null)}
+          onChange={() => setRevision((x) => x + 1)}
+        />
+      )}
     </>
   );
 }
@@ -1477,7 +1210,8 @@ function Exits({ notice }: { notice: Notice }) {
 function System({ notice }: { notice: Notice }) {
   const { data, loading } = useData("/admin/system", notice);
   if (loading) return <Spinner />;
-  if (!data) return <Empty>Не удалось загрузить данные. Обнови страницу.</Empty>;
+  if (!data)
+    return <Empty>Не удалось загрузить данные. Обнови страницу.</Empty>;
   return (
     <>
       <div className="section-title">
@@ -1619,12 +1353,7 @@ function App() {
       case "overview":
         content = <Overview user={user} notice={notice} />;
         break;
-      case "connect":
-        content = <Connect notice={notice} />;
-        break;
-      case "filtering":
-        content = <Filtering notice={notice} onChange={load} />;
-        break;
+
       case "catalog":
         content = (
           <ServiceCatalog notice={notice} admin={user.role === "admin"} />
@@ -1636,9 +1365,7 @@ function App() {
       case "users":
         content = <AdminUsers notice={notice} />;
         break;
-      case "exits":
-        content = <Exits notice={notice} />;
-        break;
+
       case "system":
         content = <System notice={notice} />;
     }
@@ -1653,7 +1380,7 @@ function App() {
         <div className="shell">
           <aside className={menu ? "open" : ""}>
             <Brand />
-            <div className="workspace-label">ЛИЧНЫЙ КАБИНЕТ</div>
+            <div className="workspace-label">АДМИНИСТРАТОР</div>
             <nav>
               {nav
                 .filter((n) => !n.admin || user.role === "admin")
@@ -1678,11 +1405,11 @@ function App() {
             </nav>
             <div className="sidebar-bottom">
               <div className="node-status">
-                <i /> Финляндия <span>DNS</span>
+                <i /> SmartDNS <span>DNS</span>
               </div>
               <div className="sidebar-version">
                 {user.version}
-                <span>БЕТА</span>
+                <span>RC</span>
               </div>
               <button className="logout" onClick={logout}>
                 <LogOut size={17} /> Выйти
@@ -1706,7 +1433,7 @@ function App() {
                 <Menu size={22} />
               </button>
               <div className="breadcrumb">
-                Личный кабинет <ChevronRight size={14} />
+                Панель <ChevronRight size={14} />
                 <b>{title}</b>
               </div>
               <div className="user-info">
@@ -1725,8 +1452,8 @@ function App() {
               {content}
             </main>
             <footer>
-              <span>SmartDNS · твой личный доступ</span>
-              <span>Бета {user.version} · HTTPS / DoT</span>
+              <span>SmartDNS · панель администратора</span>
+              <span>{user.version} · HTTPS / DoT</span>
             </footer>
           </div>
         </div>

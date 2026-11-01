@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import json
 import os
 import time
@@ -15,6 +16,7 @@ from .agent_client import AgentClient
 from .catalog import CatalogImporter
 from .config import Settings
 from .db import Database
+from .security import hash_password, validate_password
 
 
 def protected_output(path: str | None, data: dict) -> None:
@@ -29,7 +31,7 @@ def protected_output(path: str | None, data: dict) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="SmartDNS — управление бетой")
+    parser = argparse.ArgumentParser(description="SmartDNS — управление установкой")
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("init")
@@ -37,13 +39,10 @@ def main() -> None:
     cmd.add_argument("database")
     cmd = sub.add_parser("create")
     cmd.add_argument("login")
-    cmd.add_argument("name")
     cmd.add_argument("--admin", action="store_true")
     cmd.add_argument("--output")
-    cmd = sub.add_parser("invite")
-    cmd.add_argument("account_id")
-    cmd.add_argument("--recovery", action="store_true")
-    cmd.add_argument("--output")
+    cmd = sub.add_parser("admin-password")
+    cmd.add_argument("login")
     sub.add_parser("list")
     cmd = sub.add_parser("catalog-refresh")
     cmd.add_argument("--bootstrap", action="store_true")
@@ -65,18 +64,37 @@ def main() -> None:
         database.migrate()
         with database.connect() as db:
             db.execute(
-                "INSERT OR IGNORE INTO exits(id,name,ingress_ip,egress_ip,country) VALUES('fi-primary','Финляндия',?,?,'FI')",
-                (settings.public_ipv4, settings.public_ipv4),
+                "INSERT INTO exits(id,name,ingress_ip,egress_ip,country) VALUES(?,'Local',?,?,'XX') ON CONFLICT(id) DO UPDATE SET ingress_ip=excluded.ingress_ip,egress_ip=excluded.egress_ip,enabled=1,healthy=1,control_url=NULL",
+                (settings.local_exit_id, settings.public_ipv4, settings.public_ipv4),
             )
-        print("База и первичный выход подготовлены")
+            db.execute("UPDATE exits SET enabled=0 WHERE id!=?", (settings.local_exit_id,))
+            database.bump(db)
+        print("База и локальный выход подготовлены")
         return
     accounts = Accounts(settings, database)
     if args.command == "create":
-        protected_output(
-            args.output, accounts.create(args.login, args.name, role="admin" if args.admin else "user")
-        )
-    elif args.command == "invite":
-        protected_output(args.output, {"setup_url": accounts.invite(args.account_id, recovery=args.recovery)})
+        password = None
+        if args.admin:
+            password = getpass.getpass("Administrator password: ")
+            validate_password(password)
+        result = accounts.create(args.login, role="admin" if args.admin else "user")
+        if password:
+            with database.connect() as db:
+                db.execute(
+                    "UPDATE accounts SET password_hash=? WHERE id=?", (hash_password(password), result["id"])
+                )
+        protected_output(args.output, result)
+    elif args.command == "admin-password":
+        encoded = hash_password(validate_password(getpass.getpass("New administrator password: ")))
+        with database.connect() as db:
+            row = db.execute(
+                "SELECT id FROM accounts WHERE login=? AND role='admin'", (args.login,)
+            ).fetchone()
+            if not row:
+                raise ValueError("Administrator not found")
+            db.execute("UPDATE accounts SET password_hash=? WHERE id=?", (encoded, row[0]))
+            db.execute("DELETE FROM sessions WHERE account_id=?", (row[0],))
+        print("Administrator password changed; sessions revoked")
     elif args.command == "migrate-alpha":
         print(json.dumps(accounts.migrate_alpha(args.database), ensure_ascii=False, indent=2))
     elif args.command == "list":

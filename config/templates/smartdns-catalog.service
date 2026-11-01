@@ -1,0 +1,10 @@
+[Unit]
+Description=SmartDNS daily catalog update
+[Service]
+Type=oneshot
+User=smartdns
+Group=smartdns
+Environment=SMARTDNS_CONFIG=/etc/smartdns/settings.json
+LoadCredential=master.key:/etc/smartdns/master.key
+ExecStart=/opt/smartdns/current/venv/bin/smartdns catalog-refresh
+TimeoutStartSec=120

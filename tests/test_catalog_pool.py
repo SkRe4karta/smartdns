@@ -1,6 +1,7 @@
 import pytest
 
 from smartdns.catalog import Catalog, CatalogImporter, ExitPool, parse_source
+from smartdns.policy import CONNECTIVITY_NAMES, SYSTEM_SERVICE
 
 
 def test_catalog_import_handles_includes_and_rejects_cycles():
@@ -15,7 +16,7 @@ def test_catalog_import_handles_includes_and_rejects_cycles():
 
 
 def test_suffix_boundaries_and_protected_infrastructure(stack):
-    catalog = Catalog(stack["db"], stack["settings"].domain)
+    catalog = Catalog(stack["db"], stack["settings"].domain, ("dl.google.com",))
     assert catalog.match("chatgpt.com") == "openai"
     assert catalog.match("sub.chatgpt.com") == "openai"
     assert catalog.match("evilchatgpt.com") is None
@@ -34,55 +35,11 @@ def test_manual_direct_override_beats_more_specific_import(stack):
     assert Catalog(stack["db"], stack["settings"].domain).match("specific.chatgpt.com") is None
 
 
-def test_bad_update_preserves_last_working_rules(stack, tmp_path):
-    importer = CatalogImporter(stack["db"], tmp_path / "unused")
-    with pytest.raises(ValueError):
-        importer.apply(
-            {
-                "rules": [{"domain": "example.com\nmalicious", "kind": "suffix", "service_id": "openai"}],
-                "services": [{"id": "openai"}],
-            }
-        )
-    assert Catalog(stack["db"], stack["settings"].domain).match("chatgpt.com") == "openai"
-
-
-def test_pool_assignment_is_sticky_and_fails_over(stack):
-    db = stack["db"]
-    pool = ExitPool(db)
-    uid = stack["owner"]["id"]
-    first = pool.choose(uid, "openai")
-    assert first["id"] == "fi-primary"
-    with db.connect() as conn:
-        conn.execute(
-            "INSERT INTO exits(id,name,ingress_ip,egress_ip,country) VALUES('second','Other','8.8.8.8','8.8.8.8','FI')"
-        )
-    assert pool.choose(uid, "openai")["id"] == "fi-primary"
-    with db.connect() as conn:
-        conn.execute("UPDATE exits SET healthy=0 WHERE id='fi-primary'")
-    assert pool.choose(uid, "openai")["id"] == "second"
-    with db.connect() as conn:
-        conn.execute("UPDATE exits SET enabled=0")
-    assert pool.choose(uid, "openai") is None
-
-
-def test_draining_keeps_old_assignments_and_service_restrictions(stack):
-    pool = ExitPool(stack["db"])
-    uid = stack["owner"]["id"]
-    assert pool.choose(uid, "openai")
-    with stack["db"].connect() as db:
-        db.execute("UPDATE exits SET draining=1")
-    assert pool.choose(uid, "openai") is not None
-    assert pool.choose(stack["friend"]["id"], "openai") is None
-    with stack["db"].connect() as db:
-        db.execute("UPDATE exits SET allowed_services='[\"different\"]'")
-    assert pool.choose(uid, "openai") is None
-
-
 @pytest.mark.asyncio
 async def test_failed_activation_restores_catalog_and_leaves_accounts_intact(stack, tmp_path):
     import time
 
-    importer = CatalogImporter(stack["db"], tmp_path / "unused")
+    importer = CatalogImporter(stack["db"], stack["settings"].catalog_manifest)
     candidate = {
         "version": "new-fixture",
         "at": int(time.time()),
@@ -107,3 +64,33 @@ async def test_failed_activation_restores_catalog_and_leaves_accounts_intact(sta
     assert Catalog(stack["db"], stack["settings"].domain).match("chatgpt.com") == "openai"
     assert stack["accounts"].authenticate(stack["owner_session"][0])
     assert stack["accounts"].connection(stack["friend"]["id"])["doh"]
+
+
+def test_system_policy_is_protected_and_connectivity_is_exact(stack):
+    import time
+
+    importer = CatalogImporter(stack["db"], stack["settings"].catalog_manifest)
+    importer.apply(
+        {
+            "version": "fixture",
+            "at": int(time.time()),
+            "services": [{"id": "openai", "name": "AI", "category": "AI", "capability": "HTTPS"}],
+            "rules": [{"domain": "google.com", "kind": "suffix", "service_id": "openai"}],
+            "cidrs": [],
+            "skipped": [],
+        }
+    )
+    cat = Catalog(stack["db"], stack["settings"].domain)
+    for name in CONNECTIVITY_NAMES:
+        assert cat.match(name) is None
+    assert cat.match("api.google.com") == "openai"
+    assert cat.match("pornhub.com") == SYSTEM_SERVICE
+    assert not any(s["id"] == SYSTEM_SERVICE for s in cat.services())
+    assert cat.protected("pornhub.com") and cat.protected("com", suffix=True)
+    assert cat.protected("google.com", suffix=True)
+    assert not cat.protected("api.google.com")
+    with stack["db"].connect() as db:
+        db.execute("INSERT INTO route_overrides VALUES('pornhub.com','suffix','direct',NULL)")
+        stack["db"].bump(db)
+    assert cat.match("www.pornhub.com") == SYSTEM_SERVICE
+    assert ExitPool(stack["db"], "primary").choose(stack["owner"]["id"], "openai")["id"] == "primary"

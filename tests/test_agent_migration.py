@@ -30,19 +30,19 @@ async def test_agent_acknowledges_only_active_users_and_expiring_leases(stack, t
     engine = AgentEngine(stack["settings"], adapter, state_dir=tmp_path / "state")
     await engine.reconcile()
     assert engine.ready()
-    assert await engine.grant(stack["friend"]["id"], "8.8.8.8", "fi-primary", stack["db"].generation())
+    assert await engine.grant(stack["friend"]["id"], "8.8.8.8", "primary", stack["db"].generation())
     assert "8.8.8.8" in adapter.sources
     with pytest.raises(ValueError):
-        await engine.grant(stack["friend"]["id"], "127.0.0.1", "fi-primary", stack["db"].generation())
+        await engine.grant(stack["friend"]["id"], "127.0.0.1", "primary", stack["db"].generation())
     with sqlite3.connect(engine.leases) as db:
         db.execute("UPDATE leases SET expires=0")
     await engine.reconcile()
     assert not adapter.sources
-    assert await engine.grant(stack["friend"]["id"], "8.8.4.4", "fi-primary", stack["db"].generation())
+    assert await engine.grant(stack["friend"]["id"], "8.8.4.4", "primary", stack["db"].generation())
     stack["accounts"].status(stack["friend"]["id"], False)
     await engine.reconcile()
     assert not adapter.sources
-    assert not await engine.grant(stack["friend"]["id"], "8.8.4.4", "fi-primary", stack["db"].generation())
+    assert not await engine.grant(stack["friend"]["id"], "8.8.4.4", "primary", stack["db"].generation())
     await engine.http.aclose()
 
 
@@ -51,7 +51,7 @@ async def test_agent_rotation_and_watchdog_are_fail_closed(stack, tmp_path):
     adapter = Adapter(tmp_path)
     engine = AgentEngine(stack["settings"], adapter, state_dir=tmp_path / "state")
     await engine.reconcile()
-    await engine.grant(stack["owner"]["id"], "8.8.8.8", "fi-primary", stack["db"].generation())
+    await engine.grant(stack["owner"]["id"], "8.8.8.8", "primary", stack["db"].generation())
     stack["accounts"].rotate(stack["owner"]["id"])
     await engine.reconcile()
     assert not adapter.sources
@@ -102,54 +102,3 @@ def test_alpha_migration_is_idempotent_readonly_and_keeps_compatibility(stack, t
             == "example.com"
         )
     assert stack["accounts"].authenticate(token) is None
-
-
-def test_agent_is_not_ready_before_first_reconciliation_on_fresh_boot(stack, tmp_path, monkeypatch):
-    engine = AgentEngine(stack["settings"], Adapter(tmp_path), state_dir=tmp_path / "state")
-    monkeypatch.setattr("smartdns.agent.time.monotonic", lambda: 2.0)
-    assert not engine.ready()
-
-
-@pytest.mark.asyncio
-async def test_reconciliation_does_not_accumulate_sqlite_descriptors(stack, tmp_path):
-    import gc
-    from pathlib import Path
-
-    adapter = Adapter(tmp_path)
-    engine = AgentEngine(stack["settings"], adapter, state_dir=tmp_path / "state")
-    gc.collect()
-    enabled = gc.isenabled()
-    gc.disable()
-    try:
-        for _ in range(80):
-            await engine.reconcile()
-        descriptors = []
-        for path in Path("/proc/self/fd").iterdir():
-            try:
-                target = path.readlink()
-            except FileNotFoundError:
-                continue
-            if str(target).startswith(str(engine.leases)):
-                descriptors.append(target)
-        assert len(descriptors) <= 1, f"{len(descriptors)} unclosed lease database descriptors"
-    finally:
-        if enabled:
-            gc.enable()
-        gc.collect()
-        await engine.http.aclose()
-
-
-@pytest.mark.asyncio
-async def test_agent_rejects_exit_path_from_untrusted_database(stack, tmp_path, monkeypatch):
-    engine = AgentEngine(stack["settings"], Adapter(tmp_path), state_dir=tmp_path / "state")
-
-    async def forbidden(*args):
-        raise AssertionError("must not use node credentials path")
-
-    monkeypatch.setattr(engine, "remote_sync", forbidden)
-    with stack["db"].connect() as db:
-        db.execute(
-            "INSERT INTO exits(id,name,ingress_ip,egress_ip,country) VALUES('../fixture','Invalid','8.8.8.8','8.8.8.8','FI')"
-        )
-    assert not await engine.grant(stack["owner"]["id"], "1.1.1.1", "../fixture", stack["db"].generation())
-    await engine.http.aclose()

@@ -53,8 +53,8 @@ def main() -> None:
                 {
                     "data_dir": str(root / "data"),
                     "master_key_file": str(root / "master.key"),
-                    "telegram_file": str(root / "telegram.json"),
                     "public_url": "https://isolated.example.test",
+                    "public_ipv4": "8.8.8.8",
                     "frontend_dir": str(app / "frontend/dist"),
                 }
             )
@@ -76,8 +76,24 @@ def main() -> None:
             db.execute("INSERT INTO users VALUES('u0123456789ab','Migration fixture','fixture-old-hash',1,1)")
         assert json.loads(cli("migrate-alpha", str(alpha)))["imported"] == ["u0123456789ab"]
         assert json.loads(cli("migrate-alpha", str(alpha)))["imported"] == []
-        cli("invite", "u0123456789ab", "--recovery", "--output", str(root / "invitation.json"))
-        assert "/setup#" in json.loads((root / "invitation.json").read_text())["setup_url"]
+        created = json.loads(cli("create", "clean-user"))
+        assert created["status"] == "active" and "setup_url" not in created
+        # Exercise the beta-to-admin migration in the clean installed wheel.
+        with sqlite3.connect(root / "data/application.sqlite3") as db:
+            db.execute("DELETE FROM schema_migrations WHERE version=2")
+            before = db.execute(
+                "SELECT secret_hash,encrypted_secret FROM credentials ORDER BY account_id"
+            ).fetchall()
+            db.execute("UPDATE accounts SET status='invited' WHERE role='user'")
+        cli("init")
+        with sqlite3.connect(root / "data/application.sqlite3") as db:
+            assert (
+                before
+                == db.execute(
+                    "SELECT secret_hash,encrypted_secret FROM credentials ORDER BY account_id"
+                ).fetchall()
+            )
+            assert db.execute("SELECT COUNT(*) FROM accounts WHERE status='invited'").fetchone()[0] == 0
         cli("backup", str(root / "backup.sqlite3"))
         with sqlite3.connect(root / "backup.sqlite3") as db:
             assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"

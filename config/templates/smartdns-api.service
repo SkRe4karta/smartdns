@@ -1,0 +1,22 @@
+[Unit]
+Description=SmartDNS api
+After=network-online.target haproxy.service
+[Service]
+ExecStart=/opt/smartdns/current/venv/bin/python -m smartdns.api
+Environment=SMARTDNS_CONFIG=/etc/smartdns/settings.json
+User=smartdns
+Group=smartdns
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=15
+MemoryMax=192M
+LimitNOFILE=1024
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0007
+ReadWritePaths=/var/lib/smartdns
+LoadCredential=master.key:/etc/smartdns/master.key
+[Install]
+WantedBy=multi-user.target
