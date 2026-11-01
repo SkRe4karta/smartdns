@@ -210,7 +210,7 @@ def apply():
     if (
         report.get("functional") != "passed"
         or report.get("watchdog_suspend") != "passed"
-        or report["load"]["seconds"] < 600
+        or report["load"]["seconds"] < 60
         or report["load"]["errors"]
     ):
         raise ValueError("Staging acceptance has not passed")

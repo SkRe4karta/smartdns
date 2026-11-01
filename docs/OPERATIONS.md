@@ -28,3 +28,5 @@ Wildcard получен через DNS-01/acme-dns. `scripts/renew_certificate.s
 Telegram: BotFather → Login Widget → Allowed URLs, origin сайта и полный callback `/api/v1/auth/telegram/callback`. Нужны OIDC Client ID/Client Secret; токен Bot API их не заменяет. [Официальная документация](https://core.telegram.org/bots/telegram-login).
 
 Дополнительные узлы используют `smartdns-node`, сертификат сервера с IP SAN и отдельную доверенную клиентскую CA. Контрольный listener требует mTLS; loopback `/health` предназначен только для HAProxy watchdog. На основном сервере сертификаты клиента находятся в закрытом `agent-state/nodes/ID/`. Без сертификатов узел не проходит проверку и не включается.
+
+После самостоятельного заполнения `secrets/telegram.json` перезапусти `smartdns-api`: systemd передаёт секреты приложению при запуске. DNS-ключи и сеансы при обычном перезапуске API сохраняются. До реального входа Telegram остаётся непроверенной возможностью, даже если кнопка стала доступна.
