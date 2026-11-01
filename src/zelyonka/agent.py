@@ -5,7 +5,6 @@ import logging
 import os
 import re
 import socket
-import sqlite3
 import subprocess
 import time
 from collections.abc import AsyncIterator
@@ -146,7 +145,8 @@ class AgentEngine:
         self.state_dir = state_dir or Path("/opt/zelyonka-smartdns-beta/agent-state")
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.leases = self.state_dir / "leases.sqlite3"
-        with sqlite3.connect(self.leases) as db:
+        self.lease_store = Database(self.leases)
+        with self.lease_store.connect() as db:
             db.execute(
                 "CREATE TABLE IF NOT EXISTS leases(account_id TEXT,ip TEXT,exit_id TEXT,expires INTEGER,PRIMARY KEY(account_id,ip,exit_id))"
             )
@@ -234,7 +234,7 @@ class AgentEngine:
 
     def source_expiries(self, users: list[dict[str, Any]], legacy: list[dict[str, Any]]) -> dict[str, int]:
         now, active = int(time.time()), {u["id"] for u in users}
-        with sqlite3.connect(self.leases) as db:
+        with self.lease_store.connect() as db:
             db.execute("DELETE FROM leases WHERE expires<=?", (now,))
             for account_id in {r[0] for r in db.execute("SELECT DISTINCT account_id FROM leases")} - active:
                 db.execute("DELETE FROM leases WHERE account_id=?", (account_id,))
@@ -259,7 +259,7 @@ class AgentEngine:
             new_versions = {u["id"]: u["version"] for u in users}
             for account_id, version in self.applied_versions.items():
                 if new_versions.get(account_id) != version:
-                    with sqlite3.connect(self.leases) as db:
+                    with self.lease_store.connect() as db:
                         db.execute("DELETE FROM leases WHERE account_id=?", (account_id,))
             self.applied_versions = new_versions
             self.generation = generation
@@ -289,7 +289,7 @@ class AgentEngine:
             if not user or user["status"] != "active" or not exit_row:
                 return False
             now = int(time.time())
-            with sqlite3.connect(self.leases) as db:
+            with self.lease_store.connect() as db:
                 db.execute(
                     "INSERT INTO leases VALUES(?,?,?,?) ON CONFLICT(account_id,ip,exit_id) DO UPDATE SET expires=excluded.expires",
                     (account_id, ip, exit_id, now + self.settings.lease_seconds),
@@ -336,7 +336,7 @@ class AgentEngine:
             tls.load_cert_chain(credentials / "client.pem", credentials / "client.key")
             with self.db.connect(readonly=True) as db:
                 active = {r[0] for r in db.execute("SELECT id FROM accounts WHERE status='active'")}
-            with sqlite3.connect(self.leases) as db:
+            with self.lease_store.connect() as db:
                 leases = [
                     {"account_id": uid, "ip": ip, "expires": expiry}
                     for uid, ip, expiry in db.execute(

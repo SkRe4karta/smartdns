@@ -239,3 +239,9 @@ def test_dashboard_period_query_is_parsed_as_integer(client):
         response = client.get("/api/v1/me/stats", params={"days": days})
         assert response.status_code == 200 and response.json()["totals"]["total"] == 0
     assert client.get("/api/v1/me/stats?days=2").status_code == 400
+
+
+def test_unconfigured_telegram_is_disabled_without_affecting_password_login(client):
+    assert client.get("/api/v1/auth/options").json()["telegram"] is False
+    assert client.post("/api/v1/auth/telegram/start", json={}).status_code == 400
+    assert client.get("/api/v1/me").status_code == 200
