@@ -1,6 +1,6 @@
 # Implementation review
 
-Version: 0.3.0-rc.1, stabilization in progress.
+Version: 0.3.0-rc.1. Release readiness is recorded in the commit-specific acceptance report.
 
 - Identity migration keeps encrypted DNS credentials, filtering, activity and administrator sessions; recipient web sessions, enrollment tokens and passwords are revoked.
 - All target-user connection/profile/filter endpoints require the administrator dependency and mutations require CSRF. Removed invitation, OIDC and egress-management endpoints return 404.
@@ -10,3 +10,5 @@ Version: 0.3.0-rc.1, stabilization in progress.
 - Shared-host integration requires preserving existing VPN/other-service SNI routes and keeping production values in private configuration. Public templates do not replace a live ingress.
 
 The second control batch found a nested SQLite migration transaction and ambiguous responses for removed POST endpoints. Both were corrected; the affected checks passed. Final CI, artifact installation and external-device acceptance are recorded separately; this review is not a substitute for them.
+
+Operational review also corrected certificate selection in the renewal helper and restoration of installed.json during rollback. The installation scenario exercises the latter with a real SQLite snapshot and intercepted service-control calls. Ubuntu instructions reuse the existing DoT credential and distinguish system DNS from browser-only DoH; no platform-specific key is introduced.

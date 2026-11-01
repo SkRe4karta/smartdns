@@ -1,6 +1,6 @@
 # SmartDNS
 
-Self-hosted encrypted DNS, ad filtering and selective HTTPS forwarding. The project is preparing version **0.3.0-rc.1**; a release is usable only when its attached validation report passes the required checks.
+Self-hosted encrypted DNS, ad filtering and selective HTTPS forwarding. Version **0.3.0-rc.1** is a release candidate. Use an installation artifact only when its attached validation report passes the required checks; untagged branches are development snapshots.
 
 The administrator creates DNS users by username and distributes their connection settings. Recipients need no website account. One credential provides a DoT hostname, a DoH URL and an Apple configuration profile for multiple devices.
 
