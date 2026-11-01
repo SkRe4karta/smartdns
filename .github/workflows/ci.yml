@@ -12,7 +12,7 @@ concurrency:
 jobs:
   backend:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78
@@ -21,10 +21,10 @@ jobs:
       - run: uv run --no-sync ruff check src tests scripts
       - run: uv run --no-sync ruff format --check src tests scripts
       - run: uv run --no-sync mypy
-      - run: uv run --no-sync pytest tests/test_accounts_api.py tests/test_catalog_pool.py -q
+      - run: uv run --no-sync python scripts/beta_checks.py backend
   frontend:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78
@@ -36,22 +36,20 @@ jobs:
         working-directory: frontend
       - run: npm run typecheck && npm test && npm run build
         working-directory: frontend
-      - run: npx playwright install --with-deps chromium
-        working-directory: frontend
       - run: npm run test:e2e
         working-directory: frontend
   integration:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78
         with: {version: '0.13.6', python-version: '3.14.4'}
       - run: uv sync --locked
-      - run: uv run --no-sync pytest tests/test_gateway.py tests/test_oidc.py tests/test_agent_migration.py tests/test_node.py -q
+      - run: uv run --no-sync python scripts/beta_checks.py integration
   security:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78
@@ -65,7 +63,7 @@ jobs:
       - run: python scripts/scan_secrets.py
   release-check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 2
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78

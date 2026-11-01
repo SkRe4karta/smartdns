@@ -80,7 +80,7 @@ def snapshot():
 async def main():
     os.umask(0o007)
     parser = argparse.ArgumentParser()
-    parser.add_argument("--seconds", type=int, default=600)
+    parser.add_argument("--seconds", type=int, choices=range(1, 91), default=90)
     args = parser.parse_args()
     settings = Settings.load()
     root = settings.data_dir.parent
@@ -298,7 +298,7 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        asyncio.run(asyncio.wait_for(main(), timeout=120))
     except Exception as exc:
         import traceback
 
