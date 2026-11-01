@@ -57,6 +57,10 @@ def rollback(root: Path, backup: Path, units: list[str]) -> None:
     if (backup / "master.key").exists():
         shutil.copy2(backup / "master.key", config["master_key_file"])
         Path(config["master_key_file"]).chmod(0o600)
+    if (backup / "installed.json").exists():
+        shutil.copy2(backup / "installed.json", root / "installed.json")
+    else:
+        (root / "installed.json").unlink(missing_ok=True)
     if state["previous"]:
         switch(root, Path(state["previous"]))
         run(["systemctl", "start", *units])
@@ -139,6 +143,8 @@ def main() -> None:
         "db_uid": db.stat().st_uid if db.exists() else Path(config["data_dir"]).stat().st_uid,
         "db_gid": db.stat().st_gid if db.exists() else Path(config["data_dir"]).stat().st_gid,
     }
+    if (root / "installed.json").exists():
+        shutil.copy2(root / "installed.json", backup / "installed.json")
     shutil.copy2(args.settings, backup / "settings.json")
     if key.exists():
         shutil.copy2(key, backup / "master.key")

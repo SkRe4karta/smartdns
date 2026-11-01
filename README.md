@@ -1,6 +1,6 @@
 # SmartDNS
 
-Self-hosted encrypted DNS, ad filtering and selective HTTPS forwarding. The project is preparing version **0.3.0-rc.1**; a release is usable only when its attached validation report passes the required checks.
+Self-hosted encrypted DNS, ad filtering and selective HTTPS forwarding. Version **0.3.0-rc.1** is a release candidate. Use an installation artifact only when its attached validation report passes the required checks; untagged branches are development snapshots.
 
 The administrator creates DNS users by username and distributes their connection settings. Recipients need no website account. One credential provides a DoT hostname, a DoH URL and an Apple configuration profile for multiple devices.
 
@@ -16,7 +16,7 @@ DNS does not route connections to hardcoded IP addresses or arbitrary UDP/TCP tr
 
 ## Installation
 
-See [installation](docs/INSTALLATION.md), [configuration](docs/CONFIGURATION.md), [operations](docs/OPERATIONS.md) and [architecture](docs/ARCHITECTURE.md). Configure your own domain, public IPv4 and certificate. Examples use reserved addresses and are not live services.
+See [installation](docs/INSTALLATION.md), [configuration](docs/CONFIGURATION.md), [operations](docs/OPERATIONS.md) and [architecture](docs/ARCHITECTURE.md) and [Ubuntu system DNS](docs/UBUNTU.md). Configure your own domain, public IPv4 and certificate. Examples use reserved addresses and are not live services.
 
 Requires Linux with systemd, Python 3.14 and Node 24 for building the dashboard. Python and npm dependencies are locked. AdGuard Home, nginx and HAProxy are separate deployment components; shared-server installations must preserve existing listeners and routes.
 
