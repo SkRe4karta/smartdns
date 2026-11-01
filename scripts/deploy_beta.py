@@ -106,7 +106,7 @@ def prepare(archive, expected, commit, uv, staging_root):
         manifest = unpack(archive, release)
         if manifest["commit"] != commit:
             raise ValueError("Artifact commit mismatch")
-        run([uv, "venv", "--python", "/usr/bin/python3", release / "venv"])
+        run([uv, "venv", "--python", "3.14.4", release / "venv"])
         run(
             [
                 uv,
@@ -286,6 +286,16 @@ def apply():
     )
     nginx = re.sub(r"ssl_certificate .*?;", f"ssl_certificate {ROOT}/certs/fullchain.pem;", nginx)
     nginx = re.sub(r"ssl_certificate_key .*?;", f"ssl_certificate_key {ROOT}/certs/privkey.pem;", nginx)
+    nginx = nginx.replace(
+        " server_name",
+        " http2 on;\n limit_conn smartdns_connections 128;\n client_body_timeout 10s;\n server_name",
+        1,
+    )
+    write(
+        "/usr/local/sbin/smartdnsctl",
+        '#!/bin/sh\numask 0007\nexport SMARTDNS_CONFIG=/opt/smartdns-smartdns-beta/settings.json\nexec /opt/smartdns-smartdns-beta/current/venv/bin/smartdns "$@"\n',
+        0o750,
+    )
     common = f"""Restart=on-failure
 RestartSec=2
 TimeoutStopSec=15

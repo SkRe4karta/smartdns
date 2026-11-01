@@ -43,6 +43,8 @@ def main() -> None:
             if path.is_file() and "__pycache__" not in path.parts and path.suffix not in (".pyc", ".pyo"):
                 files[path.relative_to(root).as_posix()] = (path.read_bytes(), path.stat().st_mode)
     for name in [
+        ".python-version",
+        ".node-version",
         "README.md",
         "VERSION",
         "pyproject.toml",

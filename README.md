@@ -23,7 +23,8 @@ DNS не переносит произвольный IP-трафик. Telegram �
 uv sync --locked
 uv run ruff check src tests scripts
 uv run mypy
-uv run pytest -q
+uv run python scripts/beta_checks.py backend
+uv run python scripts/beta_checks.py integration
 cd frontend
 npm ci
 npm test
