@@ -32,13 +32,13 @@ class Accounts:
             (account_id, digest(key), self.crypto.encrypt(key.encode()).decode()),
         )
 
-    def create(self, login: str, name: str, *, role: str = "user") -> dict[str, Any]:
+    def create(self, login: str, name: str | None = None, *, role: str = "user") -> dict[str, Any]:
         login = login.strip().lower()
         if not LOGIN_RE.fullmatch(login):
-            raise ValueError("Логин: 3–40 латинских букв, цифр, точек, дефисов или подчёркиваний")
-        if not 1 <= len(name.strip()) <= 100 or role not in ("user", "admin"):
-            raise ValueError("Некорректные параметры пользователя")
-        account_id, token, now = "u" + secrets.token_hex(6), new_token(), int(time.time())
+            raise ValueError("Username: 3–40 латинских букв, цифр, точек, дефисов или подчёркиваний")
+        if role not in ("user", "admin"):
+            raise ValueError("Некорректная роль")
+        account_id, now = "u" + secrets.token_hex(6), int(time.time())
         with self.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             if (
@@ -47,66 +47,12 @@ class Accounts:
             ):
                 raise ValueError("Достигнут лимит пользователей")
             db.execute(
-                "INSERT INTO accounts(id,login,name,role,status,created) VALUES(?,?,?,?,'invited',?)",
-                (account_id, login, name.strip(), role, now),
+                "INSERT INTO accounts(id,login,name,role,status,created) VALUES(?,?,?,?,'active',?)",
+                (account_id, login, name or login, role, now),
             )
             self._credential(db, account_id)
-            db.execute(
-                "INSERT INTO invitations VALUES(?,?, 'setup',?,NULL)",
-                (digest(token), account_id, now + 72 * 3600),
-            )
             self.db.bump(db)
-        return {"id": account_id, "setup_url": f"{self.settings.public_url}/setup#{token}"}
-
-    def invite(self, account_id: str, *, recovery: bool = False) -> str:
-        token, now = new_token(), int(time.time())
-        with self.db.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            account = db.execute("SELECT * FROM accounts WHERE id=?", (account_id,)).fetchone()
-            if not account or account["status"] == "disabled":
-                raise ValueError("Доступный пользователь не найден")
-            db.execute("DELETE FROM invitations WHERE account_id=?", (account_id,))
-            if recovery:
-                db.execute("DELETE FROM sessions WHERE account_id=?", (account_id,))
-                db.execute(
-                    "UPDATE accounts SET telegram_sub=NULL,password_hash=NULL WHERE id=?", (account_id,)
-                )
-            db.execute(
-                "INSERT INTO invitations VALUES(?,?,?,?,NULL)",
-                (digest(token), account_id, "recovery" if recovery else "setup", now + 72 * 3600),
-            )
-        return f"{self.settings.public_url}/setup#{token}"
-
-    def invite_info(self, token: str) -> dict[str, Any] | None:
-        with self.db.connect(readonly=True) as db:
-            row = db.execute(
-                "SELECT a.id,a.login,a.name,i.purpose FROM invitations i JOIN accounts a "
-                "ON a.id=i.account_id WHERE i.token_hash=? AND i.used IS NULL AND i.expires>? "
-                "AND a.status!='disabled'",
-                (digest(token), int(time.time())),
-            ).fetchone()
-            return dict(row) if row else None
-
-    def setup(self, token: str, password: str) -> tuple[str, str]:
-        validate_password(password)
-        encoded = hash_password(password)
-        now = int(time.time())
-        with self.db.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute(
-                "SELECT i.*,a.status FROM invitations i JOIN accounts a ON a.id=i.account_id "
-                "WHERE i.token_hash=? AND i.used IS NULL AND i.expires>? AND a.status!='disabled'",
-                (digest(token), now),
-            ).fetchone()
-            if not row:
-                raise ValueError("Ссылка недействительна или уже использована")
-            db.execute("UPDATE invitations SET used=? WHERE token_hash=?", (now, digest(token)))
-            db.execute("DELETE FROM sessions WHERE account_id=?", (row["account_id"],))
-            db.execute(
-                "UPDATE accounts SET password_hash=?,status='active' WHERE id=?", (encoded, row["account_id"])
-            )
-            self.db.bump(db)
-            return self._session(db, row["account_id"])
+        return {"id": account_id, "username": login, "status": "active"}
 
     def _session(self, db: sqlite3.Connection, account_id: str) -> tuple[str, str]:
         token, csrf, now = new_token(), new_token(), int(time.time())
@@ -123,7 +69,12 @@ class Accounts:
                 "SELECT * FROM accounts WHERE login=? COLLATE NOCASE", (login.strip(),)
             ).fetchone()
         encoded = row["password_hash"] if row else None
-        if not password_ok(encoded, password) or not row or row["status"] != "active":
+        if (
+            not password_ok(encoded, password)
+            or not row
+            or row["status"] != "active"
+            or row["role"] != "admin"
+        ):
             return None
         with self.db.connect() as db:
             # Recheck after password verification: the account may have been disabled or reset.
@@ -140,7 +91,7 @@ class Accounts:
         with self.db.connect(readonly=True) as db:
             row = db.execute(
                 "SELECT a.*,s.csrf,s.token_hash AS session_hash FROM sessions s JOIN accounts a "
-                "ON a.id=s.account_id WHERE s.token_hash=? AND s.expires>? AND a.status='active'",
+                "ON a.id=s.account_id WHERE s.token_hash=? AND s.expires>? AND a.status='active' AND a.role='admin'",
                 (digest(token), int(time.time())),
             ).fetchone()
             return dict(row) if row else None
@@ -201,13 +152,7 @@ class Accounts:
                 count = db.execute("SELECT COUNT(*) FROM accounts WHERE status!='disabled'").fetchone()[0]
                 if count >= self.settings.user_limit:
                     raise ValueError("Достигнут лимит пользователей")
-            new_status = (
-                "active"
-                if enabled and (row["password_hash"] or row["telegram_sub"])
-                else "invited"
-                if enabled
-                else "disabled"
-            )
+            new_status = "active" if enabled else "disabled"
             db.execute("UPDATE accounts SET status=? WHERE id=?", (new_status, account_id))
             if not enabled:
                 db.execute("DELETE FROM sessions WHERE account_id=?", (account_id,))
@@ -217,6 +162,10 @@ class Accounts:
 
     def exception(self, account_id: str, domain: str, action: str | None) -> None:
         domain = normalize_domain(domain)
+        from .policy import CONNECTIVITY_NAMES
+
+        if action == "block" and domain in CONNECTIVITY_NAMES:
+            raise ValueError("Системные проверки интернета нельзя блокировать")
         if action == "block" and (
             domain == self.settings.domain or domain.endswith("." + self.settings.domain)
         ):
@@ -284,7 +233,7 @@ class Accounts:
             return [
                 dict(r)
                 for r in db.execute(
-                    "SELECT id,login,name,role,status,filtering,created,last_dns,telegram_sub IS NOT NULL AS telegram_linked FROM accounts ORDER BY created,id"
+                    "SELECT id,login,name,role,status,filtering,created,last_dns FROM accounts ORDER BY created,id"
                 )
             ]
 

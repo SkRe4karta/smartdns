@@ -1,10 +1,10 @@
 [
   {
     "id": "openai",
-    "name": "ChatGPT / OpenAI",
+    "name": "OpenAI / ChatGPT / Codex",
     "category": "ИИ",
     "source": "openai",
-    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+    "capability": "Вход, HTTPS и WebSocket Codex. Реальный запрос и приложения требуют клиентской проверки; сторонняя аналитика не разблокируется целиком."
   },
   {
     "id": "anthropic",
@@ -200,7 +200,7 @@
     "name": "Twitch",
     "category": "Медиа",
     "source": "twitch",
-    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+    "capability": "HTTPS, веб-плеер и приложение: воспроизведение требует клиентской проверки."
   },
   {
     "id": "soundcloud",
@@ -327,5 +327,12 @@
     "category": "Работа",
     "source": "microsoft",
     "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "supercell",
+    "name": "Supercell",
+    "category": "Игры",
+    "source": "supercell",
+    "capability": "Домены игр, Supercell ID, магазина, обновлений и поддержки. Прямые IP и игровые протоколы не проверены; завершённые игры не поддерживаются."
   }
 ]

@@ -1,47 +1,74 @@
-import { test, expect } from '@playwright/test';
-async function login(page: import('@playwright/test').Page) {
-  await page.goto('/');
-  await page.getByLabel('Логин').fill('browser-admin');
-  await page.getByLabel('Пароль', {exact:true}).fill('browser-test-password-123');
-  await page.getByRole('button', {name:'Войти',exact:true}).click();
-  await expect(page.getByRole('heading', {name:/Привет,/})).toBeVisible();
+import { test, expect } from "@playwright/test";
+async function login(page: import("@playwright/test").Page) {
+  await page.goto("/");
+  await page.getByLabel("Логин", { exact: true }).fill("browser-admin");
+  await page
+    .getByLabel("Пароль", { exact: true })
+    .fill("browser-test-password-123");
+  await page.getByRole("button", { name: "Войти", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /Привет,/ })).toBeVisible();
 }
-test('real password login, account creation and isolated setup', async ({page,browser}) => {
+test("administrator creates active username and sees every connection on one screen", async ({
+  page,
+}) => {
   await login(page);
-  await page.getByRole('button', {name:'Пользователи',exact:true}).click();
-  await page.getByLabel('Логин нового пользователя').fill('browser-friend');
-  await page.getByLabel('Имя нового пользователя').fill('Друг');
-  await page.getByRole('button', {name:'Создать',exact:true}).click();
-  const invitation = await page.locator('.issued-link code').textContent();
-  expect(invitation).toContain('/setup#');
-  const context = await browser.newContext();
-  const friend = await context.newPage();
-  await friend.goto(invitation!);
-  await friend.getByLabel('Пароль', {exact:true}).fill('friend-browser-password-123');
-  await friend.getByRole('button', {name:'Создать пароль и войти'}).click();
-  await expect(friend.getByRole('heading',{name:/Привет,/})).toBeVisible();
-  await expect(friend.getByRole('button',{name:'Пользователи',exact:true})).toHaveCount(0);
-  expect((await context.request.get('/api/v1/admin/users')).status()).toBe(403);
-  await context.close();
+  await page.getByRole("button", { name: "Пользователи", exact: true }).click();
+  await page.getByLabel("Username нового пользователя").fill("browser-friend");
+  await page.getByRole("button", { name: "Создать", exact: true }).click();
+  const card = page.getByRole("dialog");
+  await expect(
+    card.getByRole("heading", { name: "browser-friend", exact: true }),
+  ).toBeVisible();
+  await expect(
+    card.getByRole("heading", { name: "Android", exact: true }),
+  ).toBeVisible();
+  await expect(
+    card.getByRole("heading", { name: "ПК и совместимые роутеры" }),
+  ).toBeVisible();
+  await expect(
+    card.getByRole("link", { name: /Скачать .mobileconfig/ }),
+  ).toBeVisible();
+  await expect(card.getByRole("tab")).toHaveCount(0);
+  await card.getByLabel("Домен", { exact: true }).fill("ads.example.com");
+  await card.getByRole("button", { name: "Добавить", exact: true }).click();
+  await expect(
+    card.getByText("ads.example.com", { exact: true }),
+  ).toBeVisible();
+  await page.screenshot({ path: "test-results/user-card.png", fullPage: true });
 });
-test('desktop navigation, filter controls and screenshot', async ({page}) => {
-  await page.setViewportSize({width:1440,height:1000});
-  const errors:string[]=[]; page.on('pageerror', error=>errors.push(error.message));
+test("desktop admin navigation has no recipient portal or egress page", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
   await login(page);
-  await page.screenshot({path:'test-results/panel-desktop.png',fullPage:true});
-  await page.getByRole('button',{name:'Фильтрация',exact:true}).click();
-  await page.getByLabel('Домен').fill('ads.example.com');
-  await page.getByRole('button',{name:'Добавить',exact:true}).click();
-  await expect(page.getByText('ads.example.com',{exact:true})).toBeVisible();
-  await page.getByRole('button',{name:'Подключение',exact:true}).click();
-  await expect(page.getByText('Android', {exact:true})).toBeVisible();
-  await page.getByRole('button',{name:'Каталог сервисов',exact:true}).click();
-  await expect(page.getByRole('heading',{name:'ChatGPT / OpenAI'})).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Выходные IP", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Подключение", exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Каталог сервисов", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "ChatGPT / OpenAI" }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "test-results/panel-desktop.png",
+    fullPage: true,
+  });
   expect(errors).toEqual([]);
 });
-test('mobile menu fits viewport', async ({page}) => {
-  await page.setViewportSize({width:390,height:844});
+test("mobile admin menu fits viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
-  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-  await page.screenshot({path:'test-results/panel-mobile.png',fullPage:true});
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
+  await page.screenshot({
+    path: "test-results/panel-mobile.png",
+    fullPage: true,
+  });
 });

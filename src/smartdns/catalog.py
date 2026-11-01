@@ -5,7 +5,6 @@ import io
 import ipaddress
 import json
 import re
-import sqlite3
 import tarfile
 import time
 from pathlib import Path
@@ -14,17 +13,21 @@ from typing import Any
 import httpx
 
 from .db import Database
+from .policy import CONNECTIVITY_NAMES, SYSTEM_SERVICE
 from .security import normalize_domain
 
-PROTECTED_NAMES = frozenset({"github.io", "dl.google.com", "www.apple.com"})
+PROTECTED_NAMES = CONNECTIVITY_NAMES
 
 
 class Catalog:
-    def __init__(self, db: Database, own_domain: str):
+    def __init__(self, db: Database, own_domain: str, reserved_sni: tuple[str, ...] = ()):
+        self.reserved = frozenset(reserved_sni)
         self.db, self.own_domain = db, own_domain
         self.generation = -1
         self.exact: dict[str, str | None] = {}
         self.suffix: dict[str, str | None] = {}
+        self.system_exact: set[str] = set()
+        self.system_suffix: set[str] = set()
         self.overrides_exact: dict[str, str | None] = {}
         self.overrides_suffix: dict[str, str | None] = {}
 
@@ -34,14 +37,17 @@ class Catalog:
             return
         with self.db.connect(readonly=True) as db:
             rows = db.execute(
-                "SELECT d.domain,d.kind,d.service_id,s.enabled FROM domain_rules d JOIN services s ON s.id=d.service_id"
+                "SELECT d.domain,d.kind,d.service_id,s.enabled,s.protected FROM domain_rules d JOIN services s ON s.id=d.service_id"
             ).fetchall()
             overrides = db.execute("SELECT * FROM route_overrides").fetchall()
         exact: dict[str, str | None] = {}
         suffix: dict[str, str | None] = {}
         overrides_exact: dict[str, str | None] = {}
         overrides_suffix: dict[str, str | None] = {}
+        self.system_exact, self.system_suffix = set(), set()
         for row in rows:
+            if row["protected"]:
+                (self.system_exact if row["kind"] == "exact" else self.system_suffix).add(row["domain"])
             (exact if row["kind"] == "exact" else suffix)[row["domain"]] = (
                 row["service_id"] if row["enabled"] else None
             )
@@ -55,8 +61,15 @@ class Catalog:
     def match(self, domain: str) -> str | None:
         self.reload()
         name = domain.rstrip(".").lower()
-        if name in PROTECTED_NAMES or name == self.own_domain or name.endswith("." + self.own_domain):
+        if (
+            name in PROTECTED_NAMES
+            or name in self.reserved
+            or name == self.own_domain
+            or name.endswith("." + self.own_domain)
+        ):
             return None
+        if self.system_match(name):
+            return SYSTEM_SERVICE
         if name in self.overrides_exact:
             return self.overrides_exact[name]
         parts = name.split(".")
@@ -73,19 +86,38 @@ class Catalog:
                 return self.suffix[candidate]
         return None
 
+    def system_match(self, name: str) -> bool:
+        return name in self.system_exact or any(
+            name == d or name.endswith("." + d) for d in self.system_suffix
+        )
+
+    def protected(self, domain: str, *, suffix: bool = False) -> bool:
+        self.reload()
+        if domain in PROTECTED_NAMES or self.system_match(domain):
+            return True
+        return suffix and any(
+            d.endswith("." + domain) for d in PROTECTED_NAMES | self.system_exact | self.system_suffix
+        )
+
+    def protected_service(self, service_id: str | None) -> bool:
+        with self.db.connect(readonly=True) as db:
+            return bool(
+                db.execute("SELECT 1 FROM services WHERE id=? AND protected=1", (service_id,)).fetchone()
+            )
+
     def services(self) -> list[dict[str, Any]]:
         with self.db.connect(readonly=True) as db:
             return [
                 dict(r)
                 for r in db.execute(
-                    "SELECT s.*,COUNT(d.domain) AS domains FROM services s LEFT JOIN domain_rules d ON d.service_id=s.id GROUP BY s.id ORDER BY s.category,s.name"
+                    "SELECT s.*,COUNT(d.domain) AS domains FROM services s LEFT JOIN domain_rules d ON d.service_id=s.id WHERE s.hidden=0 GROUP BY s.id ORDER BY s.category,s.name"
                 )
             ]
 
     def proxy_patterns(self) -> list[str]:
         self.reload()
-        exact = self.exact | self.overrides_exact
-        suffix = self.suffix | self.overrides_suffix
+        exact = self.exact | self.overrides_exact | dict.fromkeys(self.system_exact, SYSTEM_SERVICE)
+        suffix = self.suffix | self.overrides_suffix | dict.fromkeys(self.system_suffix, SYSTEM_SERVICE)
         patterns = [
             "^" + re.escape(d) + "$" for d, service in exact.items() if service and d not in PROTECTED_NAMES
         ]
@@ -167,7 +199,7 @@ class CatalogImporter:
                     db.execute("DELETE FROM services WHERE id=?", (service_id,))
                 for row in before_services:
                     db.execute(
-                        "UPDATE services SET name=?,category=?,enabled=?,capability=?,updated=? WHERE id=?",
+                        "UPDATE services SET name=?,category=?,enabled=?,capability=?,updated=?,hidden=?,protected=? WHERE id=?",
                         (*row[1:], row[0]),
                     )
                 db.executemany("INSERT INTO domain_rules VALUES(?,?,?,?)", before_rules)
@@ -239,7 +271,29 @@ class CatalogImporter:
         }
 
     def apply(self, candidate: dict[str, Any], *, allow_large_change: bool = False) -> int:
-        rules = candidate["rules"]
+        from importlib.resources import files
+
+        system_path = Path(str(files("smartdns").joinpath("data/system-routes.json")))
+        if not system_path.is_file():
+            system_path = self.manifest.parent / "system-routes.json"
+        snapshot = json.loads(system_path.read_text())
+        system_rules = snapshot["rules"]
+        if not system_rules or not any(r["domain"] == "pornhub.com" for r in system_rules):
+            raise ValueError("Invalid protected routing snapshot")
+        candidate = dict(candidate)
+        candidate["services"] = [s for s in candidate["services"] if s["id"] != SYSTEM_SERVICE] + [
+            {
+                "id": SYSTEM_SERVICE,
+                "name": "System routing",
+                "category": "system",
+                "capability": "HTTPS",
+                "hidden": True,
+                "protected": True,
+            }
+        ]
+        system_keys = {(r["domain"], r["kind"]) for r in system_rules}
+        rules = [r for r in candidate["rules"] if (r["domain"], r["kind"]) not in system_keys]
+        rules += [dict(r, service_id=SYSTEM_SERVICE) for r in system_rules]
         if not 1 <= len(rules) <= 100_000:
             raise ValueError("Invalid catalog size")
         valid_services = {s["id"] for s in candidate["services"]}
@@ -254,20 +308,26 @@ class CatalogImporter:
                 raise ValueError("Каталог сократился более чем на 40%; требуется ручная проверка")
             for service in candidate["services"]:
                 db.execute(
-                    "INSERT INTO services(id,name,category,capability,updated) VALUES(?,?,?,?,?) "
-                    "ON CONFLICT(id) DO UPDATE SET name=excluded.name,category=excluded.category,capability=excluded.capability,updated=excluded.updated",
+                    "INSERT INTO services(id,name,category,capability,updated,hidden,protected) VALUES(?,?,?,?,?,?,?) "
+                    "ON CONFLICT(id) DO UPDATE SET name=excluded.name,category=excluded.category,capability=excluded.capability,updated=excluded.updated,hidden=excluded.hidden,protected=excluded.protected,enabled=CASE WHEN excluded.protected=1 THEN 1 ELSE services.enabled END",
                     (
                         service["id"],
                         service["name"],
                         service["category"],
                         service["capability"],
                         candidate["at"],
+                        int(service.get("hidden", False)),
+                        int(service.get("protected", False)),
                     ),
                 )
             db.execute("DELETE FROM domain_rules")
             db.executemany(
                 "INSERT INTO domain_rules VALUES(?,?,?,?)",
-                [(r["domain"], r["kind"], r["service_id"], candidate["version"]) for r in rules],
+                [
+                    (r["domain"], r["kind"], r["service_id"], candidate["version"])
+                    for r in rules
+                    if r["domain"] not in PROTECTED_NAMES
+                ],
             )
             db.execute("DELETE FROM service_cidrs WHERE service_id='telegram'")
             db.executemany(
@@ -287,47 +347,18 @@ class CatalogImporter:
 
 
 class ExitPool:
-    def __init__(self, db: Database):
-        self.db = db
+    """Single configured local egress. Old assignments remain for upgrade compatibility."""
 
-    @staticmethod
-    def usable(exit_row: sqlite3.Row, service_id: str, *, assigned: bool = False) -> bool:
-        allowed = json.loads(exit_row["allowed_services"])
-        return bool(
-            exit_row["enabled"]
-            and exit_row["healthy"]
-            and (assigned or not exit_row["draining"])
-            and (not allowed or service_id in allowed)
-        )
+    def __init__(self, db: Database, exit_id: str = "primary"):
+        self.db, self.exit_id = db, exit_id
 
     def choose(
         self, account_id: str, service_id: str, *, excluded: set[str] | None = None
     ) -> dict[str, Any] | None:
-        excluded = excluded or set()
-        with self.db.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            previous = db.execute(
-                "SELECT e.* FROM assignments a JOIN exits e ON e.id=a.exit_id WHERE a.account_id=? AND a.service_id=?",
-                (account_id, service_id),
+        if self.exit_id in (excluded or set()):
+            return None
+        with self.db.connect(readonly=True) as db:
+            row = db.execute(
+                "SELECT * FROM exits WHERE id=? AND enabled=1 AND healthy=1", (self.exit_id,)
             ).fetchone()
-            if (
-                previous
-                and previous["id"] not in excluded
-                and self.usable(previous, service_id, assigned=True)
-            ):
-                return dict(previous)
-            candidates = [
-                r
-                for r in db.execute(
-                    "SELECT e.*,COUNT(a.account_id) AS assigned FROM exits e LEFT JOIN assignments a ON a.exit_id=e.id GROUP BY e.id ORDER BY assigned,e.id"
-                )
-                if r["id"] not in excluded and self.usable(r, service_id)
-            ]
-            if not candidates:
-                return None
-            chosen = candidates[0]
-            db.execute(
-                "INSERT INTO assignments VALUES(?,?,?,?) ON CONFLICT(account_id,service_id) DO UPDATE SET exit_id=excluded.exit_id,created=excluded.created",
-                (account_id, service_id, chosen["id"], int(time.time())),
-            )
-            return dict(chosen)
+        return dict(row) if row else None

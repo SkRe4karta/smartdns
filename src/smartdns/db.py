@@ -80,12 +80,27 @@ class Database:
         with self.connect() as db:
             if db.execute("SELECT 1 FROM sqlite_master WHERE name='schema_migrations'").fetchone():
                 version = db.execute("SELECT COALESCE(MAX(version),0) FROM schema_migrations").fetchone()[0]
-                if version > 1:
+                if version > 2:
                     raise ValueError("Database is newer than this application; restore the matching release")
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(SCHEMA)
+            db.execute("BEGIN IMMEDIATE")
             db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(1,?)", (int(time.time()),))
             db.execute("INSERT OR IGNORE INTO metadata VALUES('generation','1')")
+            if not db.execute("SELECT 1 FROM schema_migrations WHERE version=2").fetchone():
+                columns = {r[1] for r in db.execute("PRAGMA table_info(services)")}
+                for column in ("hidden", "protected"):
+                    if column not in columns:
+                        db.execute(f"ALTER TABLE services ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
+                db.execute(
+                    "DELETE FROM sessions WHERE account_id IN (SELECT id FROM accounts WHERE role!='admin')"
+                )
+                db.execute("DELETE FROM invitations")
+                db.execute("DELETE FROM oauth_states")
+                db.execute("UPDATE accounts SET password_hash=NULL,telegram_sub=NULL WHERE role!='admin'")
+                db.execute("UPDATE accounts SET status='active' WHERE role='user' AND status='invited'")
+                db.execute("INSERT INTO schema_migrations VALUES(2,?)", (int(time.time()),))
+                self.bump(db)
 
     @contextlib.contextmanager
     def connect(self, *, readonly: bool = False) -> Iterator[sqlite3.Connection]:
