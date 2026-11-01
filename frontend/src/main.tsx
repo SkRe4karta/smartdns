@@ -462,6 +462,19 @@ function ConnectionCards({
           </div>
         </div>
       ))}
+      <div className="info-box">
+        <Wifi size={21} />
+        <div>
+          <b>Ubuntu и приложения на компьютере</b>
+          <p>
+            Отдельный ключ не нужен. Обычное поле «DNS» в настройках Ubuntu не
+            принимает URL DoH. Для системного DNS используйте systemd-resolved с
+            DoT: IP сервера и имя DoT выше для TLS/SNI. DNS, настроенный только
+            в браузере, не распространяется на Codex и другие приложения. Уже
+            работающее системное подключение менять не нужно.
+          </p>
+        </div>
+      </div>
       <div className="connection-block">
         <h4>iPhone и MacBook</h4>
         <p>
