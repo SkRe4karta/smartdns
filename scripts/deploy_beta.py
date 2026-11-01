@@ -236,6 +236,13 @@ def apply():
         "candidate": candidate,
     }
     write(backup / "backup.json", json.dumps(manifest, indent=2), 0o600)
+    for folder in ["secrets", "certs", "acme"]:
+        if (ROOT / folder).exists():
+            shutil.copytree(ROOT / folder, backup / folder)
+            for path in [backup / folder, *(backup / folder).rglob("*")]:
+                path.chmod(0o700 if path.is_dir() else 0o600)
+    shutil.copyfile(ROOT / "settings.json", backup / "settings.json")
+    (backup / "settings.json").chmod(0o600)
     backup_database(ROOT / "data/application.sqlite3", backup / "beta.sqlite3")
     backup_database(ALPHA / "state/users.sqlite3", backup / "alpha.sqlite3")
     write(ROOT / "rollback-location", str(backup) + "\n", 0o600)
