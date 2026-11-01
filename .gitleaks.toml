@@ -1,0 +1,3 @@
+title = "SmartDNS source secret scanning"
+[extend]
+useDefault = true

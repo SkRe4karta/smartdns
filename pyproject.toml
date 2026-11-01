@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling==1.33.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "smartdns-dns"
+version = "0.2.0b1"
+description = "Account-based Smart DNS control plane and authenticated DNS gateway"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+  "fastapi>=0.115", "uvicorn>=0.34", "httpx>=0.28", "argon2-cffi>=25.1",
+  "cryptography>=46", "dnspython>=2.8", "PyJWT[crypto]>=2.10", "PyYAML>=6.0.2",
+]
+
+[project.scripts]
+smartdns = "smartdns.cli:main"
+smartdns-agent = "smartdns.agent:main"
+smartdns-gateway = "smartdns.gateway:main"
+smartdns-node = "smartdns.node:main"
+
+[dependency-groups]
+dev = ["pytest>=8.4", "pytest-asyncio>=1.2", "pytest-cov>=7", "ruff>=0.14", "mypy>=1.18", "pip-audit>=2.9", "types-PyYAML>=6"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/smartdns"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"config/services.json" = "smartdns/data/services.json"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py314"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "S"]
+ignore = ["S101", "S104", "S603", "S607"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S105", "S106", "S311"]
+
+[tool.mypy]
+python_version = "3.14"
+files = ["src/smartdns"]
+check_untyped_defs = true
+disallow_incomplete_defs = true
+no_implicit_optional = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = ["dns.*"]
+ignore_missing_imports = true

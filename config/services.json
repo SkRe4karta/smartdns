@@ -1,0 +1,331 @@
+[
+  {
+    "id": "openai",
+    "name": "ChatGPT / OpenAI",
+    "category": "ИИ",
+    "source": "openai",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "anthropic",
+    "name": "Claude / Anthropic",
+    "category": "ИИ",
+    "source": "anthropic",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "gemini",
+    "name": "Gemini / AI Studio",
+    "category": "ИИ",
+    "source": "google-gemini",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "perplexity",
+    "name": "Perplexity",
+    "category": "ИИ",
+    "source": "perplexity",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "xai",
+    "name": "Grok / xAI",
+    "category": "ИИ",
+    "source": "xai",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "huggingface",
+    "name": "Hugging Face",
+    "category": "ИИ",
+    "source": "huggingface",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "cursor",
+    "name": "Cursor",
+    "category": "ИИ",
+    "source": "cursor",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "copilot",
+    "name": "GitHub Copilot",
+    "category": "ИИ",
+    "source": "github-copilot",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "windsurf",
+    "name": "Windsurf",
+    "category": "ИИ",
+    "source": "windsurf",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "github",
+    "name": "GitHub",
+    "category": "Разработка",
+    "source": "github",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "gitlab",
+    "name": "GitLab",
+    "category": "Разработка",
+    "source": "gitlab",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "docker",
+    "name": "Docker Hub",
+    "category": "Разработка",
+    "source": "docker",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "npm",
+    "name": "npm",
+    "category": "Разработка",
+    "source": "npmjs",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "pypi",
+    "name": "PyPI",
+    "category": "Разработка",
+    "source": "python",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "jetbrains",
+    "name": "JetBrains",
+    "category": "Разработка",
+    "source": "jetbrains",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "telegram",
+    "name": "Telegram Web",
+    "category": "Общение",
+    "source": "telegram",
+    "capability": "Веб / HTTPS; прямые IP и звонки не поддерживаются"
+  },
+  {
+    "id": "discord",
+    "name": "Discord",
+    "category": "Общение",
+    "source": "discord",
+    "capability": "Веб / HTTPS; прямые IP и звонки не поддерживаются"
+  },
+  {
+    "id": "whatsapp",
+    "name": "WhatsApp",
+    "category": "Общение",
+    "source": "whatsapp",
+    "capability": "Веб / HTTPS; прямые IP и звонки не поддерживаются"
+  },
+  {
+    "id": "instagram",
+    "name": "Instagram",
+    "category": "Соцсети",
+    "source": "instagram",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "facebook",
+    "name": "Facebook",
+    "category": "Соцсети",
+    "source": "facebook",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "x",
+    "name": "X / Twitter",
+    "category": "Соцсети",
+    "source": "twitter",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "reddit",
+    "name": "Reddit",
+    "category": "Соцсети",
+    "source": "reddit",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "tiktok",
+    "name": "TikTok",
+    "category": "Соцсети",
+    "source": "tiktok",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "pinterest",
+    "name": "Pinterest",
+    "category": "Соцсети",
+    "source": "pinterest",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "youtube",
+    "name": "YouTube",
+    "category": "Медиа",
+    "source": "youtube",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "spotify",
+    "name": "Spotify",
+    "category": "Медиа",
+    "source": "spotify",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "netflix",
+    "name": "Netflix",
+    "category": "Медиа",
+    "source": "netflix",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "disney",
+    "name": "Disney+",
+    "category": "Медиа",
+    "source": "disney",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "twitch",
+    "name": "Twitch",
+    "category": "Медиа",
+    "source": "twitch",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "soundcloud",
+    "name": "SoundCloud",
+    "category": "Медиа",
+    "source": "soundcloud",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "deezer",
+    "name": "Deezer",
+    "category": "Медиа",
+    "source": "deezer",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "steam",
+    "name": "Steam",
+    "category": "Игры",
+    "source": "steam",
+    "capability": "Веб-магазин, вход и HTTPS-загрузки; игровой UDP не поддерживается"
+  },
+  {
+    "id": "epic",
+    "name": "Epic Games",
+    "category": "Игры",
+    "source": "epicgames",
+    "capability": "Веб-магазин, вход и HTTPS-загрузки; игровой UDP не поддерживается"
+  },
+  {
+    "id": "ea",
+    "name": "EA",
+    "category": "Игры",
+    "source": "ea",
+    "capability": "Веб-магазин, вход и HTTPS-загрузки; игровой UDP не поддерживается"
+  },
+  {
+    "id": "ubisoft",
+    "name": "Ubisoft",
+    "category": "Игры",
+    "source": "ubisoft",
+    "capability": "Веб-магазин, вход и HTTPS-загрузки; игровой UDP не поддерживается"
+  },
+  {
+    "id": "battlenet",
+    "name": "Battle.net",
+    "category": "Игры",
+    "source": "blizzard",
+    "capability": "Веб-магазин, вход и HTTPS-загрузки; игровой UDP не поддерживается"
+  },
+  {
+    "id": "riot",
+    "name": "Riot Games",
+    "category": "Игры",
+    "source": "riot",
+    "capability": "Веб-магазин, вход и HTTPS-загрузки; игровой UDP не поддерживается"
+  },
+  {
+    "id": "xbox",
+    "name": "Xbox",
+    "category": "Игры",
+    "source": "xbox",
+    "capability": "Веб-магазин, вход и HTTPS-загрузки; игровой UDP не поддерживается"
+  },
+  {
+    "id": "playstation",
+    "name": "PlayStation",
+    "category": "Игры",
+    "source": "playstation",
+    "capability": "Веб-магазин, вход и HTTPS-загрузки; игровой UDP не поддерживается"
+  },
+  {
+    "id": "nintendo",
+    "name": "Nintendo",
+    "category": "Игры",
+    "source": "nintendo",
+    "capability": "Веб-магазин, вход и HTTPS-загрузки; игровой UDP не поддерживается"
+  },
+  {
+    "id": "zoom",
+    "name": "Zoom",
+    "category": "Работа",
+    "source": "zoom",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "notion",
+    "name": "Notion",
+    "category": "Работа",
+    "source": "notion",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "figma",
+    "name": "Figma",
+    "category": "Работа",
+    "source": "figma",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "canva",
+    "name": "Canva",
+    "category": "Работа",
+    "source": "canva",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "dropbox",
+    "name": "Dropbox",
+    "category": "Работа",
+    "source": "dropbox",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "google",
+    "name": "Google",
+    "category": "Работа",
+    "source": "google",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  },
+  {
+    "id": "microsoft",
+    "name": "Microsoft",
+    "category": "Работа",
+    "source": "microsoft",
+    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+  }
+]
