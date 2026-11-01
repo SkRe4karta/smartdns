@@ -25,3 +25,5 @@ Requires Linux with systemd, Python 3.14 and Node 24 for building the dashboard.
 `main` contains releases; `develop` integrates changes; feature and fix branches use pull requests. See [release process](docs/RELEASE.md), [validation](docs/VALIDATION.md), [migration](docs/MIGRATION.md) and [security](SECURITY.md).
 
 Production configuration, databases, certificates, credentials and private connection links must never be committed. License: [MIT](LICENSE).
+
+Repository history was sanitized for public distribution. Read the [cleanup scope and cache limitations](docs/PRIVACY.md) before reusing an older clone.
