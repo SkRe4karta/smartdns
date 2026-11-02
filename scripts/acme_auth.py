@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Certbot DNS-01 hook; secrets are read from a root-only credentials file."""
 
+import http.client
+import ipaddress
 import json
 import os
 import subprocess
@@ -23,7 +25,19 @@ request = urllib.request.Request(  # noqa: S310 -- root-owned configuration, HTT
         "X-Api-Key": credentials["password"],
     },
 )
-with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310 -- fixed HTTPS ACME service
+
+
+class SourceHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        source = str(ipaddress.ip_address(credentials["source_address"]))
+        return self.do_open(
+            lambda host, **kwargs: http.client.HTTPSConnection(host, source_address=(source, 0), **kwargs),
+            req,
+        )
+
+
+opener = urllib.request.build_opener(*([SourceHTTPSHandler()] if credentials.get("source_address") else []))
+with opener.open(request, timeout=30) as response:  # noqa: S310 -- fixed HTTPS ACME service
     if response.status != 200:
         raise RuntimeError("ACME DNS update failed")
 for _ in range(60):
