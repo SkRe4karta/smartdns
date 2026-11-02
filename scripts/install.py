@@ -99,11 +99,18 @@ def main() -> None:
         raise ValueError("Restore the matching master encryption key before upgrading")
     release = root / "releases" / args.commit
     if release.exists():
-        raise ValueError("Release directory already exists; do not reuse a partially prepared release")
-    manifest = unpack(args.artifact, release)
+        manifest = json.loads((release / "manifest.json").read_text())
+        if manifest.get("dirty"):
+            raise ValueError("Cannot install a dirty artifact")
+        for name, checksum in manifest["files"].items():
+            if hashlib.sha256((release / name).read_bytes()).hexdigest() != checksum:
+                raise ValueError("Existing release contents differ from the verified artifact")
+    else:
+        manifest = unpack(args.artifact, release)
     if manifest["commit"] != args.commit:
         raise ValueError("Artifact commit mismatch")
-    run([args.uv, "venv", "--python", "3.14.4", str(release / "venv")])
+    if not (release / "venv/bin/python").exists():
+        run([args.uv, "venv", "--python", "3.14.4", str(release / "venv")])
     python = str(release / "venv/bin/python")
     run(
         [

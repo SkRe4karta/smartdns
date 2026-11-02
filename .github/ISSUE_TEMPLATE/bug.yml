@@ -1,0 +1,14 @@
+name: Bug report
+description: Report a reproducible problem without private connection details.
+body:
+  - type: markdown
+    attributes:
+      value: Never include DNS keys, connection URLs, cookies, credentials or unredacted production logs. Report vulnerabilities privately under Security.
+  - type: input
+    id: version
+    attributes: {label: Version and platform, placeholder: 'SmartDNS version, Ubuntu version, client OS'}
+    validations: {required: true}
+  - type: textarea
+    id: reproduction
+    attributes: {label: Reproduction, description: Expected and actual behavior; sanitized error reason and protocol.}
+    validations: {required: true}

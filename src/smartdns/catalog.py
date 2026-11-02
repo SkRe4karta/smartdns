@@ -213,7 +213,7 @@ class CatalogImporter:
 
     async def download(self) -> dict[str, Any]:
         async with httpx.AsyncClient(
-            timeout=45, follow_redirects=True, headers={"User-Agent": "SmartDNSDNS/0.2"}
+            timeout=45, follow_redirects=True, headers={"User-Agent": "SmartDNS/1.0"}
         ) as client:
             response = await client.get(
                 "https://api.github.com/repos/v2fly/domain-list-community/commits/master"

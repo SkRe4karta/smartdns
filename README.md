@@ -1,29 +1,50 @@
 # SmartDNS
 
-Self-hosted encrypted DNS, ad filtering and selective HTTPS forwarding. Version **0.3.0-rc.1** is a release candidate. Use an installation artifact only when its attached validation report passes the required checks; untagged branches are development snapshots.
+Self-hosted encrypted DNS, ad filtering and selective HTTPS forwarding, with an administrator dashboard. One DNS credential works across multiple devices; recipients do not need a website account.
 
-The administrator creates DNS users by username and distributes their connection settings. Recipients need no website account. One credential provides a DoT hostname, a DoH URL and an Apple configuration profile for multiple devices.
+![SmartDNS light dashboard](docs/images/overview-light.png)
 
-## Capabilities and limits
+*Screenshot uses an isolated synthetic demonstration database.*
 
-- Admin-only dashboard; user status, filtering, aggregate activity and credential rotation.
-- AdGuard Home filtering; configurable installation address and domain.
-- Domain routing catalog including OpenAI/Codex, Twitch and Supercell HTTPS resources.
-- Daily validated catalog updates with rollback to the previous working version.
-- The bundled system routing policy includes categories not displayed in the dashboard. Policy sources are inspectable in the catalog manifests and code; dashboard visibility is not the complete policy.
+## What it does
 
-DNS does not route connections to hardcoded IP addresses or arbitrary UDP/TCP traffic. A catalog entry is not a promise that every feature of a native app, game or call works. DNS cannot remove every advertisement, particularly ads sharing a content hostname. Account region and server IP reputation can affect access.
+- DoT for Android/system resolvers, DoH for browsers and compatible routers, and a shared Apple configuration profile.
+- Administrator-only user management, per-user filtering and exceptions, credential rotation, optional TOTP and recovery codes.
+- Global activity charts, DNS error reasons, per-user source-IP history and temporary proxy admissions. Detailed events: 24 hours; aggregates: seven days.
+- IPv4/IPv6 ingress; a local exit or an existing tunnel to one foreign exit. Forwarded HTTPS remains end-to-end encrypted.
+- Validated daily catalog updates and AdGuard DNS Filter + HaGeZi Multi PRO.
+- Automated wildcard certificate renewal, verified release installation, upgrades and rollback.
 
-## Installation
+## Install on your VPS
 
-See [installation](docs/INSTALLATION.md), [configuration](docs/CONFIGURATION.md), [operations](docs/OPERATIONS.md) and [architecture](docs/ARCHITECTURE.md) and [Ubuntu system DNS](docs/UBUNTU.md). Configure your own domain, public IPv4 and certificate. Examples use reserved addresses and are not live services.
+Supported automated installation: **Ubuntu 24.04 or 26.04 LTS, x86_64**, at least 1 GiB RAM and 2 GiB free disk. Use your own domain and public IPv4; IPv6 is optional. Inbound TCP 443 and 853 are required. ACME uses DNS-01; port 80 is not required for SmartDNS.
 
-Requires Linux with systemd, Python 3.14 and Node 24 for building the dashboard. Python and npm dependencies are locked. AdGuard Home, nginx and HAProxy are separate deployment components; shared-server installations must preserve existing listeners and routes.
+1. Download the archive and `SHA256SUMS` from a validated [release](../../releases). Verify the archive checksum and build provenance.
+2. Extract it into an empty directory and read `manifest.json`. Use its exact commit and the published checksum:
 
-## Development and releases
+```sh
+sudo python3 scripts/setup.py \
+  --artifact /path/to/smartdns-release.tar.gz \
+  --sha256 PUBLISHED_SHA256 --commit MANIFEST_COMMIT \
+  --domain dns.example.com --ipv4 YOUR_PUBLIC_IPV4
+```
 
-`main` contains releases; `develop` integrates changes; feature and fix branches use pull requests. See [release process](docs/RELEASE.md), [validation](docs/VALIDATION.md), [migration](docs/MIGRATION.md) and [security](SECURITY.md).
+The installer requests the ACME email, prints the DNS records to create, configures isolated components and asks for the administrator password privately. The default certificate flow requires one CNAME delegation to acme-dns. Node is not required on the VPS. Never paste DNS/API secrets into public issues or shell arguments.
 
-Production configuration, databases, certificates, credentials and private connection links must never be committed. License: [MIT](LICENSE).
+**Shared VPS:** use `--mode shared` to prepare configuration fragments; merge them with your existing ingress and firewall before starting the application. Existing listeners and unrelated VPNs must be preserved. See [installation](docs/INSTALLATION.md) for the complete procedure and existing DNS-provider plugin support.
 
-Repository history was sanitized for public distribution. Read the [cleanup scope and cache limitations](docs/PRIVACY.md) before reusing an older clone.
+## Documentation
+
+[Configuration](docs/CONFIGURATION.md) · [architecture](docs/ARCHITECTURE.md) · [operations and recovery](docs/OPERATIONS.md) · [Ubuntu system DNS](docs/UBUNTU.md) · [migration](docs/MIGRATION.md) · [privacy](docs/PRIVACY.md) · [security](SECURITY.md) · [contributing](CONTRIBUTING.md) · [release validation](docs/VALIDATION.md)
+
+## Boundaries
+
+DNS selects hostnames; it cannot route hardcoded IPs, arbitrary game protocols, MTProto or calls. Catalog membership does not establish native-app compatibility. Browser/app account region, codecs and exit-IP reputation can affect access. DNS cannot remove all advertisements.
+
+Forwarding admission uses the observed public source IP. People behind the same NAT share that boundary. Only the observed address family is admitted: routed answers use IPv4 for IPv4 DNS clients and IPv6 for IPv6 DNS clients. IPv4-only applications may need an IPv4 DNS transport. Ordinary IPv6 answers remain intact.
+
+A real VPN may override DNS or use a different HTTPS source address. Configure a consistent DNS/HTTPS egress; universal compatibility is not claimed. One ingress and one exit remain single points of failure.
+
+The bundled routing policy includes protected categories omitted from the dashboard. Its sources remain inspectable; dashboard visibility is not a complete policy inventory.
+
+The repository contains no production configuration, databases, certificates or live connection links. License: [MIT](LICENSE). The GitHub owner's public identity and required attribution remain visible.

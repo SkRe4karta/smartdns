@@ -12,6 +12,19 @@ class Settings:
     data_dir: Path = Path("/var/lib/smartdns")
     public_url: str = ""
     public_ipv4: str = ""
+    public_ipv6: str = ""
+    forward_mode: str = "local"
+    forward_route_table: int = 28443
+    forward_route_priority: int = 18443
+    fast_quic_fallback: bool = True
+    forward_source_ipv4: str = ""
+    forward_interface: str = ""
+    expected_egress_ipv4: str = ""
+    certificate_status_file: Path = Path("/var/lib/smartdns/certificate-status.json")
+    dns_concurrency: int = 150
+    dot_connections: int = 256
+    dot_pipeline: int = 16
+    query_timeout: float = 8.0
     agent_socket: Path = Path("/run/smartdns/agent.sock")
     master_key_file: Path = Path("/etc/smartdns/master.key")
     agh_url: str = "http://127.0.0.1:3010"
@@ -87,8 +100,19 @@ class Settings:
             or url.password
             or url.query
             or url.fragment
+            or url.port not in (None, 443)
         ):
             raise ValueError("Configure public_url as an HTTPS origin")
+        import re
+
+        if not re.fullmatch(
+            r"(?=.{1,190}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\Z", url.hostname
+        ):
+            raise ValueError("Configure public_url with an ASCII DNS hostname")
+        if result.public_url.endswith("/"):
+            from dataclasses import replace
+
+            result = replace(result, public_url=result.public_url.rstrip("/"))
         if not result.public_ipv4:
             raise ValueError("Configure public_ipv4 with the installation public IPv4")
         if (
@@ -96,4 +120,35 @@ class Settings:
             or not ipaddress.ip_address(result.public_ipv4).is_global
         ):
             raise ValueError("Configure a real public_ipv4; documentation addresses are not deployments")
+        if result.public_ipv6:
+            ip = ipaddress.ip_address(result.public_ipv6)
+            if ip.version != 6 or not ip.is_global:
+                raise ValueError("public_ipv6 must be a global IPv6 address")
+        if result.forward_mode not in ("local", "tunnel"):
+            raise ValueError("forward_mode must be local or tunnel")
+        if result.forward_mode == "tunnel":
+            if (
+                not result.forward_source_ipv4
+                or not result.forward_interface
+                or not result.expected_egress_ipv4
+            ):
+                raise ValueError("Tunnel mode requires source IPv4, interface and expected egress IPv4")
+            if ipaddress.ip_address(result.forward_source_ipv4).version != 4:
+                raise ValueError("forward_source_ipv4 must be IPv4")
+            import re
+
+            if not re.fullmatch(r"[a-zA-Z0-9_.-]{1,15}", result.forward_interface):
+                raise ValueError("Invalid forwarding interface")
+            if (
+                ipaddress.ip_address(result.expected_egress_ipv4).version != 4
+                or not ipaddress.ip_address(result.expected_egress_ipv4).is_global
+            ):
+                raise ValueError("expected_egress_ipv4 must be public")
+        if not (
+            1 <= result.dns_concurrency <= 1000
+            and 1 <= result.dot_connections <= 2048
+            and 1 <= result.dot_pipeline <= 64
+            and 1 <= result.query_timeout <= 30
+        ):
+            raise ValueError("Invalid DNS capacity or timeout setting")
         return result

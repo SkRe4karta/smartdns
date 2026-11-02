@@ -1,15 +1,11 @@
-# Validation and acceptance
+# Validation
 
-This document defines release checks; the commit-specific acceptance report attached to a release records actual results. A version number alone is not evidence of passing checks. Unfinished mandatory scenarios block publication of a ready release candidate.
+The release report records the exact tested commit, artifact checksum and installed manifest. Required CI: backend, frontend, integration, security, release-check. First-install checks cover isolated Ubuntu 24.04/26.04 environments; synthetic certificates/configuration are used where public issuance cannot be exercised in CI. Live certificate renewal and real client applications are checked separately on the deployment.
 
-The three planned batches are:
+Validation has two focused intermediate batches and one final batch. Network runs are bounded to two-minute cycles; no long production load campaign is required. Repeat only affected scenarios after fixes, then run required final CI.
 
-1. Privacy: managed source history, documentation, examples, secrets and artifact contents. Keep private backups and record cache limitations separately.
-2. Admin migration/access/policy: preserve DNS credentials, administrator access, filtering and statistics; create active username-only profiles; deny recipient access; protect system rules and render one connection card.
-3. Final: required backend/frontend/integration/security/release CI, exact-commit build, wheel-only clean installation, upgrade/backup restoration, DoH/DoT, profiles and short external-device acceptance. Corrective checks address failures or subsequent changes; no sustained load runs are used.
+Acceptance covers migration/key preservation, username creation and admin-only connections, TOTP/recovery/replay, per-user IP/error attribution, pagination/retention, DoH GET/POST, persistent/pipelined DoT, IPv4/IPv6 source admission, rejected unknown users, revocation, agent/tunnel failure, catalog/filter protection, certificate renewal/deployment, installation/update/restore and desktop system DNS.
 
-The bounded automated suite contains 23 Python scenarios, three API-transport frontend scenarios, three browser scenarios and one clean-install/upgrade/backup-restore scenario. Required CI reports these checks under five protected contexts. The installation scenario intercepts service-control commands while restoring a real SQLite backup, application symlink, key and installed identity.
+Measure direct and routed sites consistently before/after: DNS, TCP/TLS, first response, short transfer, errors and observed exit. Report median and p95 with sample counts. HTTP 403 from a bot-protected homepage alone does not prove an application is unavailable. Validate actual ChatGPT/Codex/Twitch behavior separately and state untested functions.
 
-External acceptance records Android Private DNS internet validation on Wi-Fi and mobile data, desktop application DNS, Twitch video in the browser/mobile app and an actual Codex request. Record device/browser limits such as unavailable HEVC/1440p separately from DNS failure. Successful desktop/browser traffic does not prove every VPN, native app, game, call or region. Apple profile generation and authorization are distinct from a physical-device installation test.
-
-Record the source SHA, archive SHA256, installed manifest identity, CI links, client observations, rollback command location and remaining limits in the acceptance report. Production configuration and private rollback paths do not belong in its public copy. Historical sanitized tags are archived source, not newly validated installable releases.
+Short runs do not establish multi-day availability, maximum throughput, every operator/network or all native app protocols. Missing mandatory acceptance is reported as pending and blocks a completed 1.0 publication.

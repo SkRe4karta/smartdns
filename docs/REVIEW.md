@@ -1,14 +1,7 @@
-# Implementation review
+# Release review
 
-Version: 0.3.0-rc.1. Release readiness is recorded in the commit-specific acceptance report.
+Version: 1.0.0. Final readiness is recorded in the commit-specific acceptance asset.
 
-- Identity migration keeps encrypted DNS credentials, filtering, activity and administrator sessions; recipient web sessions, enrollment tokens and passwords are revoked.
-- All target-user connection/profile/filter endpoints require the administrator dependency and mutations require CSRF. Removed invitation, OIDC and egress-management endpoints return 404.
-- System routing is pinned, compiled into the wheel, omitted from catalog serialization and takes precedence over manual overrides. The owner can still inspect and fork the source. User ad filtering is independent.
-- Exact OS connectivity probes resolve through a separate unfiltered upstream and never receive the forwarding address. Imported sibling domains retain routing. Proxy ingress retains source authorization, public-address destination checks and a separate agent-health watchdog.
-- Valid rate-limited DNS messages return REFUSED inside the existing DoT connection. Invalid credentials close access; a revoked credential is rechecked on every request.
-- Shared-host integration requires preserving existing VPN/other-service SNI routes and keeping production values in private configuration. Public templates do not replace a live ingress.
+Review scope: administrator authorization/CSRF/body limits, optional TOTP/replay/recovery, secret handling, IPv4/IPv6 admission, private RPC, catalog protection, guarded tunnel routing, bounded DNS/telemetry, certificate deployment and archive/installation integrity. The release PR records concrete findings, corrections and checks. This is an engineering code review, not an independent penetration-test certification.
 
-The second control batch found a nested SQLite migration transaction and ambiguous responses for removed POST endpoints. Both were corrected; the affected checks passed. Final CI, artifact installation and external-device acceptance are recorded separately; this review is not a substitute for them.
-
-Operational review also corrected certificate selection in the renewal helper and restoration of installed.json during rollback. The installation scenario exercises the latter with a real SQLite snapshot and intercepted service-control calls. Ubuntu instructions reuse the existing DoT credential and distinguish system DNS from browser-only DoH; no platform-specific key is introduced.
+Known boundaries: source-IP admission is shared behind NAT; DNS cannot reroute hardcoded IPs or arbitrary protocols; ECH without usable SNI is unsupported; IPv4-only applications may require IPv4 DNS transport; one ingress/exit provides no host-level redundancy. See README and VALIDATION.

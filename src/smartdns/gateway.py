@@ -4,6 +4,7 @@ import asyncio
 import base64
 import contextlib
 import ipaddress
+import signal
 import ssl
 import struct
 import time
@@ -11,6 +12,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+import dns.edns
 import dns.flags
 import dns.message
 import dns.rcode
@@ -25,7 +27,7 @@ from .catalog import Catalog, ExitPool
 from .config import Settings
 from .db import Database
 from .policy import CONNECTIVITY_NAMES
-from .security import ACCOUNT_RE, DNS_KEY_RE, digest, public_ipv4
+from .security import ACCOUNT_RE, DNS_KEY_RE, digest, public_ip
 from .telemetry import Recorder
 
 
@@ -36,10 +38,18 @@ class Gateway:
         self.catalog = Catalog(self.db, settings.domain, settings.reserved_sni)
         self.pool = ExitPool(self.db, settings.local_exit_id)
         self.agent = agent or AgentClient(settings)
-        self.upstream = upstream or httpx.AsyncClient(timeout=8, limits=httpx.Limits(max_connections=100))
+        self.upstream = upstream or httpx.AsyncClient(
+            timeout=settings.query_timeout,
+            limits=httpx.Limits(max_connections=100, max_keepalive_connections=32),
+        )
         self.recorder = Recorder(self.db)
-        self.semaphore = asyncio.Semaphore(150)
+        self.semaphore = asyncio.Semaphore(settings.dns_concurrency)
         self.rates: dict[str, tuple[int, int]] = {}
+        self.dot_active = 0
+        self.unauthenticated_failures = 0
+        self.tls_rejected = 0
+        self.unknown_rates: dict[str, float] = {}
+        self.context: ssl.SSLContext | None = None
         self.lease_cache: dict[tuple[str, str, str, int], float] = {}
 
     def account(self, key: str) -> dict[str, Any] | None:
@@ -61,6 +71,8 @@ class Gateway:
 
     def rate_limited(self, account_id: str) -> bool:
         now = int(time.monotonic())
+        if len(self.rates) > 10000:
+            self.rates = {k: v for k, v in self.rates.items() if v[0] >= now - 1}
         second, count = self.rates.get(account_id, (now, 0))
         count = count + 1 if second == now else 1
         self.rates[account_id] = (now, count)
@@ -68,7 +80,7 @@ class Gateway:
 
     async def authorize(self, account: dict[str, Any], ip: str, exit_id: str) -> bool:
         try:
-            source = public_ipv4(ip)
+            source = public_ip(ip)
         except ValueError:
             return False
         generation = self.db.generation()
@@ -85,6 +97,8 @@ class Gateway:
         if self.lease_cache.get(cache_key, 0) > time.monotonic():
             return bool(await self.agent.is_ready(exit_id))
         if await self.agent.grant(account["id"], source, exit_id, generation):
+            if len(self.lease_cache) > 10000:
+                self.lease_cache = {k: v for k, v in self.lease_cache.items() if v > time.monotonic()}
             self.lease_cache[cache_key] = time.monotonic() + 30
             return True
         return False
@@ -100,74 +114,164 @@ class Gateway:
             ).fetchone()
         return str(row[0]) if row else None
 
-    async def query(self, key: str, ip: str, wire: bytes, *, record: bool = True) -> bytes:
+    def failure(self, key: str, ip: str, transport: str, reason: str) -> None:
         account = self.account(key)
         if not account:
+            self.unauthenticated_failures += 1
+            now = time.monotonic()
+            if self.unknown_rates.get(ip, 0) > now - 60:
+                return
+            if len(self.unknown_rates) >= 1000:
+                self.unknown_rates = {k: v for k, v in self.unknown_rates.items() if v > now - 60}
+                if len(self.unknown_rates) >= 1000:
+                    return
+            self.unknown_rates[ip] = now
+        self.recorder.record(
+            account_id=account["id"] if account else "",
+            at=int(time.time()),
+            domain="",
+            qtype="",
+            result="error",
+            service_id=None,
+            exit_id=None,
+            elapsed_ms=0,
+            client_ip=ip,
+            transport=transport,
+            key_version=account.get("version") if account else None,
+            rcode=None,
+            reason=reason,
+        )
+
+    async def query(
+        self, key: str, ip: str, wire: bytes, *, record: bool = True, transport: str = "dot"
+    ) -> bytes:
+        account = await asyncio.to_thread(self.account, key)
+        if not account:
+            if record:
+                self.failure(key, ip, transport, "unknown_key")
             raise PermissionError("Unknown DNS key")
-        if not 12 <= len(wire) <= 65535:
-            raise ValueError("Invalid DNS message size")
-        query = dns.message.from_wire(wire)
-        if query.flags & dns.flags.QR or query.opcode() != 0 or len(query.question) != 1:
-            raise ValueError("Only single DNS queries are supported")
+        try:
+            if not 12 <= len(wire) <= 65535:
+                raise ValueError("Invalid DNS message size")
+            query = dns.message.from_wire(wire)
+            if query.flags & dns.flags.QR or query.opcode() != 0 or len(query.question) != 1:
+                raise ValueError("Only single DNS queries are supported")
+        except ValueError, dns.exception.DNSException:
+            if record:
+                self.failure(key, ip, transport, "malformed_query")
+            raise
         question = query.question[0]
-        if (
-            self.rate_limited(account["id"])
-            or question.rdclass != 1
-            or question.rdtype in (dns.rdatatype.AXFR, dns.rdatatype.IXFR, dns.rdatatype.ANY)
-        ):
-            response = dns.message.make_response(query)
-            response.set_rcode(dns.rcode.REFUSED)
-            return response.to_wire()
         domain = question.name.to_text().rstrip(".").lower()
         start = time.monotonic()
-        result, service_id, exit_id = "allowed", None, None
-        async with self.semaphore:
+        result, service_id, exit_id, reason = "allowed", None, None, None
+        response = dns.message.make_response(query)
+        phase = "queue"
+        if self.rate_limited(account["id"]):
+            response.set_rcode(dns.rcode.REFUSED)
+            result, reason = "error", "rate_limited"
+        elif question.rdclass != 1 or question.rdtype in (
+            dns.rdatatype.AXFR,
+            dns.rdatatype.IXFR,
+            dns.rdatatype.ANY,
+        ):
+            response.set_rcode(dns.rcode.REFUSED)
+            result, reason = "refused", "unsupported_query"
+        else:
             try:
-                upstream = await self.upstream.post(
-                    self.settings.probe_resolver
-                    if domain in CONNECTIVITY_NAMES
-                    else f"{self.settings.agh_url}/dns-query/{account['id']}",
-                    content=wire,
-                    headers={"Content-Type": "application/dns-message", "Accept": "application/dns-message"},
-                )
-                upstream.raise_for_status()
-                response = dns.message.from_wire(upstream.content)
-                if (
-                    response.id != query.id
-                    or response.question != query.question
-                    or not response.flags & dns.flags.QR
-                ):
-                    raise ValueError("Invalid upstream response")
-                blocked = any(
-                    r.rdtype in (1, 28) and any(str(item) in ("0.0.0.0", "::") for item in r)
-                    for r in response.answer
-                )
-                if blocked:
-                    result = "blocked"
-                elif response.rcode() == dns.rcode.NOERROR:
-                    service_id = self.catalog.match(domain)
-                    if service_id and question.rdtype in (1, 28, 64, 65):
-                        chosen = self.pool.choose(account["id"], service_id)
-                        exit_id = chosen["id"] if chosen else None
-                        ready = bool(chosen and await self.authorize(account, ip, chosen["id"]))
-                        response = dns.message.make_response(query)
-                        response.flags |= dns.flags.RA
-                        if not ready:
-                            response.set_rcode(dns.rcode.SERVFAIL)
-                            result = "error"
-                        else:
-                            if question.rdtype == dns.rdatatype.A:
-                                assert chosen is not None
-                                response.answer.append(
-                                    dns.rrset.from_text(question.name, 60, "IN", "A", chosen["ingress_ip"])
+                async with asyncio.timeout(self.settings.query_timeout), self.semaphore:
+                    phase = "upstream"
+                    upstream = await self.upstream.post(
+                        self.settings.probe_resolver
+                        if domain in CONNECTIVITY_NAMES
+                        else f"{self.settings.agh_url}/dns-query/{account['id']}",
+                        content=wire,
+                        headers={
+                            "Content-Type": "application/dns-message",
+                            "Accept": "application/dns-message",
+                        },
+                    )
+                    upstream.raise_for_status()
+                    response = dns.message.from_wire(upstream.content)
+                    if (
+                        response.id != query.id
+                        or response.question != query.question
+                        or not response.flags & dns.flags.QR
+                    ):
+                        raise ValueError("Invalid upstream response")
+                    blocked = any(
+                        r.rdtype in (1, 28) and any(str(i) in ("0.0.0.0", "::") for i in r)
+                        for r in response.answer
+                    )
+                    if blocked:
+                        result, reason = "blocked", "filtered"
+                    elif response.rcode() == dns.rcode.NOERROR:
+                        service_id = await asyncio.to_thread(self.catalog.match, domain)
+                        if service_id and question.rdtype in (1, 28, 64, 65):
+                            phase = "admission"
+                            chosen = await asyncio.to_thread(self.pool.choose, account["id"], service_id)
+                            exit_id = chosen["id"] if chosen else None
+                            ready = bool(chosen and await self.authorize(account, ip, chosen["id"]))
+                            response = dns.message.make_response(query)
+                            response.flags |= dns.flags.RA
+                            if not ready:
+                                response.set_rcode(dns.rcode.SERVFAIL)
+                                result, reason = (
+                                    "error",
+                                    "admission_unavailable" if chosen else "exit_unavailable",
                                 )
-                            result = "proxied"
-                else:
-                    result = "error" if response.rcode() == dns.rcode.SERVFAIL else "allowed"
-            except httpx.HTTPError, ValueError, dns.exception.DNSException:
+                            else:
+                                assert chosen is not None
+                                family = ipaddress.ip_address(ip).version
+                                if question.rdtype == dns.rdatatype.A and family == 4:
+                                    response.answer.append(
+                                        dns.rrset.from_text(
+                                            question.name, 60, "IN", "A", chosen["ingress_ip"]
+                                        )
+                                    )
+                                elif (
+                                    question.rdtype == dns.rdatatype.AAAA
+                                    and family == 6
+                                    and self.settings.public_ipv6
+                                ):
+                                    response.answer.append(
+                                        dns.rrset.from_text(
+                                            question.name, 60, "IN", "AAAA", self.settings.public_ipv6
+                                        )
+                                    )
+                                result = "proxied"
+                    elif response.rcode() == dns.rcode.NXDOMAIN:
+                        result, reason = "nxdomain", "name_not_found"
+                    else:
+                        result, reason = "error", "upstream_dns_error"
+            except (httpx.HTTPError, ValueError, dns.exception.DNSException, TimeoutError) as exc:
                 response = dns.message.make_response(query)
                 response.set_rcode(dns.rcode.SERVFAIL)
                 result = "error"
+                reason = (
+                    "queue_timeout"
+                    if phase == "queue"
+                    else "admission_timeout"
+                    if phase == "admission"
+                    else "upstream_timeout"
+                    if isinstance(exc, (TimeoutError, httpx.TimeoutException))
+                    else "invalid_upstream"
+                    if isinstance(exc, (ValueError, dns.exception.DNSException))
+                    else "upstream_network"
+                )
+        if query.edns >= 0 and result in ("error", "blocked", "refused"):
+            ede = (
+                15
+                if result == "blocked"
+                else 18
+                if response.rcode() == dns.rcode.REFUSED
+                else 14
+                if phase == "admission"
+                else 23
+            )
+            response.use_edns(
+                payload=min(max(query.payload, 512), 1232),
+                options=[dns.edns.EDEOption(dns.edns.EDECode(ede), reason or "DNS error")],
+            )
         if record:
             self.recorder.record(
                 account_id=account["id"],
@@ -178,6 +282,11 @@ class Gateway:
                 service_id=service_id,
                 exit_id=exit_id,
                 elapsed_ms=round((time.monotonic() - start) * 1000, 2),
+                client_ip=ip,
+                transport=transport,
+                key_version=account.get("version"),
+                rcode=dns.rcode.to_text(response.rcode()),
+                reason=reason,
             )
         return response.to_wire()
 
@@ -185,7 +294,7 @@ class Gateway:
         key = self.legacy_key(ip)
         if not key:
             return None
-        return await self.query(key, ip, wire, record=False)
+        return await self.query(key, ip, wire, transport="plain")
 
     async def plain_tcp(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
@@ -215,33 +324,48 @@ class Gateway:
                 await writer.wait_closed()
 
     async def dot(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        tasks: set[asyncio.Task[None]] = set()
+        lock = asyncio.Lock()
+        accepted = self.dot_active < self.settings.dot_connections
+        if accepted:
+            self.dot_active += 1
         try:
-            ssl_obj = writer.get_extra_info("ssl_object")
-            key = getattr(ssl_obj, "dns_key", "")
-            if not self.account(key):
+            if not accepted:
                 return
-            peer = writer.get_extra_info("peername")
-            source = peer[0]
+            key = getattr(writer.get_extra_info("ssl_object"), "dns_key", "")
+            source = str(ipaddress.ip_address(writer.get_extra_info("peername")[0]))
+            if not await asyncio.to_thread(self.account, key):
+                self.failure(key, source, "dot", "unknown_key")
+                return
+
+            async def answer(payload: bytes) -> None:
+                try:
+                    wire = await self.query(key, source, payload, transport="dot")
+                    async with lock:
+                        writer.write(struct.pack("!H", len(wire)) + wire)
+                        await asyncio.wait_for(writer.drain(), 10)
+                except OSError, PermissionError, ValueError, dns.exception.DNSException, TimeoutError:
+                    writer.close()
+
             for _ in range(10000):
-                head = await asyncio.wait_for(reader.readexactly(2), timeout=120)
+                head = await asyncio.wait_for(reader.readexactly(2), 120)
                 length = struct.unpack("!H", head)[0]
                 if length < 12:
+                    self.failure(key, source, "dot", "malformed_query")
                     return
-                payload = await asyncio.wait_for(reader.readexactly(length), timeout=10)
-                answer = await self.query(key, source, payload)
-                writer.write(struct.pack("!H", len(answer)) + answer)
-                await asyncio.wait_for(writer.drain(), timeout=10)
-        except (
-            asyncio.IncompleteReadError,
-            TimeoutError,
-            PermissionError,
-            BlockingIOError,
-            ValueError,
-            OSError,
-            dns.exception.DNSException,
-        ):
+                payload = await asyncio.wait_for(reader.readexactly(length), 10)
+                if len(tasks) >= self.settings.dot_pipeline:
+                    await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                task = asyncio.create_task(answer(payload))
+                tasks.add(task)
+                task.add_done_callback(tasks.discard)
+        except asyncio.IncompleteReadError, TimeoutError, OSError, ValueError:
             pass
         finally:
+            if accepted:
+                self.dot_active -= 1
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
             writer.close()
             with contextlib.suppress(OSError, ssl.SSLError):
                 await writer.wait_closed()
@@ -255,11 +379,17 @@ class Gateway:
             suffix = "." + self.settings.domain
             key = name[: -len(suffix)] if name and name.endswith(suffix) else ""
             if not (DNS_KEY_RE.fullmatch(key) or ACCOUNT_RE.fullmatch(key)):
+                self.tls_rejected += 1
                 return ssl.ALERT_DESCRIPTION_UNRECOGNIZED_NAME
             ssl_object.dns_key = key
             return None
 
-        context.set_servername_callback(sni)
+        def select_context(ssl_object: Any, name: str | None, original: Any) -> int | None:
+            if self.context is not None:
+                ssl_object.context = self.context
+            return sni(ssl_object, name, original)
+
+        context.set_servername_callback(select_context)
         return context
 
 
@@ -301,20 +431,31 @@ def create_gateway(settings: Settings, *, engine: Gateway | None = None, enable_
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         task = asyncio.create_task(gateway.recorder.run())
-        server = None
+        servers: list[asyncio.Server] = []
         plain_server = None
         udp_transport = None
         udp = LegacyUDP(gateway)
         if enable_dot:
-            server = await asyncio.start_server(
-                gateway.dot,
-                "0.0.0.0",
-                settings.dot_port,
-                ssl=gateway.tls_context(),
-                ssl_handshake_timeout=10,
-                limit=131072,
-                backlog=256,
-            )
+            gateway.context = gateway.tls_context()
+            for address in ["0.0.0.0", settings.public_ipv6] if settings.public_ipv6 else ["0.0.0.0"]:
+                servers.append(
+                    await asyncio.start_server(
+                        gateway.dot,
+                        address,
+                        settings.dot_port,
+                        ssl=gateway.context,
+                        ssl_handshake_timeout=5,
+                        backlog=128,
+                    )
+                )
+
+            def reload_tls() -> None:
+                try:
+                    gateway.context = gateway.tls_context()
+                except OSError, ssl.SSLError:
+                    gateway.recorder.write_errors += 1
+
+            asyncio.get_running_loop().add_signal_handler(signal.SIGHUP, reload_tls)
         if settings.plain_dns_enabled:
             plain_server = await asyncio.start_server(
                 gateway.plain_tcp, settings.public_ipv4, settings.plain_dns_port
@@ -325,9 +466,11 @@ def create_gateway(settings: Settings, *, engine: Gateway | None = None, enable_
         try:
             yield
         finally:
-            if server:
+            for server in servers:
                 server.close()
                 await server.wait_closed()
+            if enable_dot:
+                asyncio.get_running_loop().remove_signal_handler(signal.SIGHUP)
             if plain_server:
                 plain_server.close()
                 await plain_server.wait_closed()
@@ -340,6 +483,15 @@ def create_gateway(settings: Settings, *, engine: Gateway | None = None, enable_
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+            remaining = []
+            while not gateway.recorder.queue.empty():
+                remaining.append(gateway.recorder.queue.get_nowait())
+            if remaining:
+                try:
+                    await asyncio.to_thread(gateway.recorder.flush, remaining)
+                except Exception:
+                    gateway.recorder.dropped += len(remaining)
+                    gateway.recorder.write_errors += 1
             await gateway.upstream.aclose()
             await gateway.agent.close()
 
@@ -348,31 +500,52 @@ def create_gateway(settings: Settings, *, engine: Gateway | None = None, enable_
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
-        return {"ready": True, "stats_dropped": gateway.recorder.dropped}
+        return {
+            "ready": True,
+            "telemetry": gateway.recorder.status(),
+            "dot_connections": gateway.dot_active,
+            "unauthenticated_failures": gateway.unauthenticated_failures,
+            "tls_rejected": gateway.tls_rejected,
+        }
 
     @app.api_route("/dns-query/{key}", methods=["GET", "POST"])
     async def doh(key: str, request: Request) -> Response:
-        if not gateway.account(key):
+        peer = request.client.host if request.client else ""
+        source = request.headers.get("x-real-ip", "") if peer == "127.0.0.1" else peer
+        try:
+            source = str(ipaddress.ip_address(source))
+        except ValueError as exc:
+            raise HTTPException(400, "Invalid source address") from exc
+        if not await asyncio.to_thread(gateway.account, key):
+            gateway.failure(key, source, "doh", "unknown_key")
             raise HTTPException(403, "DNS-профиль недействителен")
         if request.method == "GET":
             encoded = request.query_params.get("dns", "")
             if len(encoded) > 87384:
+                gateway.failure(key, source, "doh", "malformed_query")
                 raise HTTPException(413, "DNS message too large")
             try:
                 payload = base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
             except ValueError as e:
+                gateway.failure(key, source, "doh", "malformed_query")
                 raise HTTPException(400, "Invalid DNS encoding") from e
         else:
             if request.headers.get("content-type", "").split(";")[0] != "application/dns-message":
                 raise HTTPException(415, "Expected application/dns-message")
+            if not request.headers.get("content-length", "0").isdigit():
+                raise HTTPException(400, "Invalid content length")
             if int(request.headers.get("content-length", "0")) > 65535:
+                gateway.failure(key, source, "doh", "malformed_query")
                 raise HTTPException(413, "DNS message too large")
-            payload = await request.body()
-        peer = request.client.host if request.client else ""
-        source = request.headers.get("x-real-ip", "") if peer == "127.0.0.1" else peer
+            body = bytearray()
+            async for chunk in request.stream():
+                body.extend(chunk)
+                if len(body) > 65535:
+                    gateway.failure(key, source, "doh", "malformed_query")
+                    raise HTTPException(413, "DNS message too large")
+            payload = bytes(body)
         try:
-            ipaddress.ip_address(source)
-            answer = await gateway.query(key, source, payload)
+            answer = await gateway.query(key, source, payload, transport="doh")
         except PermissionError as e:
             raise HTTPException(403, "DNS-профиль отключён") from e
         except BlockingIOError as e:
@@ -393,6 +566,8 @@ def main() -> None:
         access_log=False,
         log_level="warning",
         proxy_headers=False,
+        limit_concurrency=settings.dns_concurrency,
+        timeout_keep_alive=30,
     )
 
 
