@@ -19,7 +19,16 @@ from pathlib import Path
 
 
 def run(args: list[str], **kwargs) -> str:
-    return subprocess.run(args, check=True, text=True, capture_output=True, timeout=115, **kwargs).stdout
+    try:
+        return subprocess.run(args, check=True, text=True, capture_output=True, timeout=115, **kwargs).stdout
+    except subprocess.CalledProcessError as exc:
+        import sys
+
+        print((exc.stderr or "")[-5000:], file=sys.stderr)
+        detail = Path("/opt/smartdns/install-error.log")
+        if detail.exists():
+            print(detail.read_text()[-5000:], file=sys.stderr)
+        raise
 
 
 def main() -> None:

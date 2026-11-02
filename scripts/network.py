@@ -66,6 +66,9 @@ def main() -> None:
         if not re.fullmatch("[a-zA-Z0-9_.-]{1,15}", interface):
             raise ValueError("Invalid tunnel interface")
         source = str(ipaddress.IPv4Address(cfg["forward_source_ipv4"]))
+        rules.append(
+            f'add rule inet {table} smartdns_egress ip saddr {source} ip daddr 127.0.0.0/8 oifname "lo" accept'
+        )
         rules.append(f'add rule inet {table} smartdns_egress ip saddr {source} oifname != "{interface}" drop')
     run(["nft", "-f", "-"], input="\n".join(rules) + "\n")
     if tunnel:
