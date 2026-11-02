@@ -59,6 +59,8 @@ def main() -> None:
                     "certbot",
                     "renew",
                     "--non-interactive",
+                    # systemd already schedules renewal; Certbot's random sleep exceeds our deadline.
+                    "--no-random-sleep-on-renew",
                     "--cert-name",
                     cfg["cert_name"],
                     "--config-dir",
