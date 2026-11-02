@@ -105,7 +105,10 @@ class HostAdapter:
         batch: list[str] = []
         size = 0
         for pattern in patterns:
-            command = f"add acl @{version} {path} {pattern}"
+            # HAProxy's CLI consumes backslash escapes before compiling the regex.
+            # Preserve literal dots/hyphens, so lookalike domains never gain admission.
+            escaped = pattern.replace("\\", "\\\\")
+            command = f"add acl @{version} {path} {escaped}"
             if size + len(command) > 6000 and batch:
                 if self.runtime(";".join(batch)).strip():
                     raise RuntimeError("HAProxy ACL insertion failed")

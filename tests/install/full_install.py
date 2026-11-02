@@ -190,6 +190,20 @@ def main() -> None:
     status, data, _ = request("/api/v1/admin/users", "POST", json.dumps({"username": "fixture-client"}), auth)
     assert status == 201
     account = json.loads(data)["id"]
+
+    def acl_lookup(hostname):
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as control:
+            control.settimeout(5)
+            control.connect("/run/haproxy/smartdns-admin.sock")
+            control.sendall(("get acl /etc/haproxy/smartdns-origins.acl " + hostname + "\n").encode())
+            control.shutdown(socket.SHUT_WR)
+            answer = b""
+            while part := control.recv(65536):
+                answer += part
+            return answer.decode()
+
+    assert "match=yes" in acl_lookup("api.openai.com")
+    assert "match=no" in acl_lookup("badopenai.com")
     _, data, _ = request("/api/v1/admin/users/" + account + "/connection", headers=auth)
     connection = json.loads(data)
     # Test source is bound only inside this disposable network namespace.
