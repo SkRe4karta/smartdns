@@ -131,7 +131,7 @@ def main() -> None:
         try:
             if request("/api/v1/health")[0] == 200:
                 break
-        except OSError, ssl.SSLError:
+        except (OSError, ssl.SSLError):
             pass
         time.sleep(0.5)
     assert request("/api/v1/health")[0] == 200
