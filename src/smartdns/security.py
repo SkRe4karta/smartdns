@@ -65,6 +65,15 @@ def public_ipv4(value: str) -> str:
     return str(ip)
 
 
+def public_ip(value: str) -> str:
+    ip = ipaddress.ip_address(value)
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    if not ip.is_global:
+        raise ValueError("Требуется публичный IP")
+    return str(ip)
+
+
 def public_destination(value: str) -> bool:
     try:
         return ipaddress.ip_address(value).is_global

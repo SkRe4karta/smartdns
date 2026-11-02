@@ -4,6 +4,7 @@ After=network-online.target haproxy.service
 [Service]
 ExecStart=/opt/smartdns/current/venv/bin/python -m smartdns.api
 Environment=SMARTDNS_CONFIG=/etc/smartdns/settings.json
+Environment=SMARTDNS_MASTER_KEY_FILE=%d/master.key
 User=smartdns
 Group=smartdns
 Restart=on-failure
@@ -15,6 +16,13 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
 UMask=0007
 ReadWritePaths=/var/lib/smartdns
 LoadCredential=master.key:/etc/smartdns/master.key

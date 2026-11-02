@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -33,7 +34,7 @@ def main() -> None:
         raise SystemExit("Commit all source changes before producing a release artifact")
     epoch = int(run(["git", "show", "-s", "--format=%ct", "HEAD"]))
     version = root.joinpath("VERSION").read_text().strip()
-    if version != "0.3.0-rc.1":
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?", version):
         raise SystemExit("Unexpected release version")
     if not root.joinpath("frontend/dist/index.html").is_file():
         raise SystemExit("Build the frontend first")
@@ -49,6 +50,8 @@ def main() -> None:
         "LICENSE",
         "THIRD_PARTY_NOTICES.md",
         "SECURITY.md",
+        "CONTRIBUTING.md",
+        "CHANGELOG.md",
         "VERSION",
         "pyproject.toml",
         "uv.lock",
@@ -67,6 +70,27 @@ def main() -> None:
         if len(wheels) != 1:
             raise RuntimeError("Expected exactly one application wheel")
         files["wheels/" + wheels[0].name] = (wheels[0].read_bytes(), 0o644)
+
+    lock = json.loads(root.joinpath("frontend/package-lock.json").read_text())
+    components = [
+        {"type": "library", "name": name, "version": v, "purl": f"pkg:pypi/{name}@{v}"}
+        for name, v in re.findall(
+            r"^([a-zA-Z0-9_.-]+)==([^\s;]+)", root.joinpath("requirements.txt").read_text(), re.M
+        )
+    ]
+    for name, package in lock.get("packages", {}).items():
+        if name.startswith("node_modules/") and not package.get("dev"):
+            components.append(
+                {"type": "library", "name": name.removeprefix("node_modules/"), "version": package["version"]}
+            )
+    sbom = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "version": 1,
+        "metadata": {"component": {"type": "application", "name": "SmartDNS", "version": version}},
+        "components": components,
+    }
+    files["SBOM.cdx.json"] = (json.dumps(sbom, sort_keys=True, indent=2).encode() + b"\n", 0o644)
     manifest = {
         "version": version,
         "commit": commit,
@@ -90,6 +114,7 @@ def main() -> None:
             info.mtime = epoch
             bundle.addfile(info, io.BytesIO(data))
     checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
+    (output / "SBOM.cdx.json").write_bytes(files["SBOM.cdx.json"][0])
     (output / "SHA256SUMS").write_text(f"{checksum}  {archive.name}\n")
     print(json.dumps({"artifact": str(archive), "sha256": checksum, "commit": commit, "dirty": dirty}))
 

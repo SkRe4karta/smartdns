@@ -6,7 +6,9 @@ async function login(page: import("@playwright/test").Page) {
     .getByLabel("Пароль", { exact: true })
     .fill("browser-test-password-123");
   await page.getByRole("button", { name: "Войти", exact: true }).click();
-  await expect(page.getByRole("heading", { name: /Привет,/ })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /Обзор SmartDNS/ }),
+  ).toBeVisible();
 }
 test("administrator creates active username and sees every connection on one screen", async ({
   page,
@@ -49,8 +51,19 @@ test("desktop admin navigation has no recipient portal or egress page", async ({
   await expect(
     page.getByRole("button", { name: "Подключение", exact: true }),
   ).toHaveCount(0);
+  await page.getByLabel("Тема оформления").selectOption("dark");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.screenshot({
+    path: "test-results/overview-dark.png",
+    fullPage: true,
+  });
+  await page.getByLabel("Тема оформления").selectOption("light");
+  await page.screenshot({
+    path: "test-results/overview-light.png",
+    fullPage: true,
+  });
   await page
-    .getByRole("button", { name: "Каталог сервисов", exact: true })
+    .getByRole("button", { name: "Каталог и маршруты", exact: true })
     .click();
   await expect(
     page.getByRole("heading", { name: "ChatGPT / OpenAI" }),

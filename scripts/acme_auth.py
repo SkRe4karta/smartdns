@@ -12,8 +12,10 @@ credentials = json.loads(
     Path(os.environ.get("ACME_DNS_CREDENTIALS", "/etc/smartdns/acme-dns.json")).read_text()
 )
 validation = os.environ["CERTBOT_VALIDATION"]
-request = urllib.request.Request(
-    "https://auth.acme-dns.io/update",
+if not credentials.get("api_url", "https://auth.acme-dns.io").startswith("https://"):
+    raise ValueError("ACME DNS API must use HTTPS")
+request = urllib.request.Request(  # noqa: S310 -- root-owned configuration, HTTPS validated above
+    credentials.get("api_url", "https://auth.acme-dns.io").rstrip("/") + "/update",
     data=json.dumps({"subdomain": credentials["subdomain"], "txt": validation}).encode(),
     headers={
         "Content-Type": "application/json",
