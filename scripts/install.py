@@ -114,8 +114,24 @@ def main() -> None:
         manifest = unpack(args.artifact, release)
     if manifest["commit"] != args.commit:
         raise ValueError("Artifact commit mismatch")
-    if not (release / "venv/bin/python").exists():
-        run([args.uv, "venv", "--python", "3.14.4", str(release / "venv")])
+    runtime = root / "python"
+    runtime.mkdir(parents=True, exist_ok=True)
+    runtime.chmod(0o755)
+    venv_python = release / "venv/bin/python"
+    if venv_python.exists() and any(
+        venv_python.resolve().is_relative_to(p) for p in (Path("/root"), Path("/home"))
+    ):
+        if (root / "current").exists() and (root / "current").resolve() == release:
+            raise ValueError("Active runtime is inside a protected home; prepare a new release directory")
+        shutil.rmtree(release / "venv")
+    if not venv_python.exists():
+        run(
+            [args.uv, "venv", "--python", "3.14.4", "--managed-python", str(release / "venv")],
+            env=os.environ | {"UV_PYTHON_INSTALL_DIR": str(runtime)},
+        )
+    for path in [runtime, *runtime.rglob("*")]:
+        if not path.is_symlink():
+            path.chmod(0o755 if path.is_dir() or path.stat().st_mode & 0o111 else 0o644)
     python = str(release / "venv/bin/python")
     run(
         [

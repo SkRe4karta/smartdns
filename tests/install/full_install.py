@@ -14,6 +14,7 @@ import socket
 import ssl
 import struct
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -137,6 +138,43 @@ def main() -> None:
             pass
         time.sleep(0.5)
     assert request("/api/v1/health")[0] == 200
+    # A deterministic DNS authority avoids coupling installation acceptance to an external resolver's uptime.
+    # AdGuard, the gateway, HTTP and TLS remain real processes.
+    resolver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    resolver.bind(("127.0.0.1", 15354))
+
+    def answer_dns():
+        while True:
+            packet, peer = resolver.recvfrom(4096)
+            end = 12
+            while packet[end]:
+                end += packet[end] + 1
+            end += 5
+            qtype = struct.unpack("!H", packet[end - 4 : end - 2])[0]
+            answer = (
+                (b"\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x3c\x00\x04" + socket.inet_aton("93.184.216.34"))
+                if qtype == 1
+                else b""
+            )
+            response = (
+                packet[:2]
+                + b"\x81\x80"
+                + struct.pack("!HHHH", 1, int(bool(answer)), 0, 0)
+                + packet[12:end]
+                + answer
+            )
+            resolver.sendto(response, peer)
+
+    threading.Thread(target=answer_dns, daemon=True).start()
+    local = http.client.HTTPConnection("127.0.0.1", 3010, timeout=5)
+    local.request(
+        "POST",
+        "/control/dns_config",
+        json.dumps({"upstream_dns": ["127.0.0.1:15354"], "fallback_dns": []}),
+        {"Content-Type": "application/json"},
+    )
+    assert local.getresponse().status == 200
+    local.close()
     status, data, headers = request(
         "/api/v1/auth/login",
         "POST",
@@ -207,6 +245,7 @@ def main() -> None:
                 "real_systemd_nginx_haproxy_adguard": "passed",
                 "dot_doh_profile_ip_history": "passed",
                 "synthetic_acme": True,
+                "synthetic_dns_upstream": True,
                 "public_acme_renewal": "deployment_gate",
                 "version": manifest["version"],
                 "commit": manifest["commit"],
@@ -216,4 +255,34 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        if os.environ.get("SMARTDNS_DISPOSABLE_INSTALL_TEST") == "1" and Path("/.dockerenv").exists():
+            import sys
+
+            subprocess.run(
+                [
+                    "curl",
+                    "-sS",
+                    "--max-time",
+                    "3",
+                    "--unix-socket",
+                    "/run/smartdns/agent.sock",
+                    "http://agent/status",
+                ],
+                stdout=sys.stderr,
+                check=False,
+            )
+            db = Path("/var/lib/smartdns/application.sqlite3")
+            if db.exists():
+                import sqlite3
+
+                with sqlite3.connect(db) as connection:
+                    print(
+                        connection.execute(
+                            "SELECT result,rcode,reason FROM dns_events ORDER BY id DESC LIMIT 5"
+                        ).fetchall(),
+                        file=sys.stderr,
+                    )
+        raise

@@ -1,6 +1,6 @@
 # Validation
 
-The release report records the exact tested commit, artifact checksum and installed manifest. Required CI: backend, frontend, integration, security, release-check. First-install checks cover isolated Ubuntu 24.04/26.04 environments; synthetic certificates/configuration are used where public issuance cannot be exercised in CI. Live certificate renewal and real client applications are checked separately on the deployment.
+The release report records the exact tested commit, artifact checksum and installed manifest. Required CI: backend, frontend, integration, security, release-check. First-install checks cover isolated Ubuntu 24.04/26.04 environments; synthetic certificates/configuration and a local DNS authority are used where public issuance cannot be exercised in CI. Live certificate renewal and real client applications are checked separately on the deployment.
 
 Validation has two focused intermediate batches and one final batch. Network runs are bounded to two-minute cycles; no long production load campaign is required. Repeat only affected scenarios after fixes, then run required final CI.
 
