@@ -137,7 +137,8 @@ def main() -> None:
         except (OSError, ssl.SSLError):
             pass
         time.sleep(0.5)
-    assert request("/api/v1/health")[0] == 200
+    health_status, health_body, _ = request("/api/v1/health")
+    assert health_status == 200, (health_status, health_body.decode(errors="replace"))
     # A deterministic DNS authority avoids coupling installation acceptance to an external resolver's uptime.
     # AdGuard, the gateway, HTTP and TLS remain real processes.
     resolver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -228,7 +229,10 @@ def main() -> None:
         for _ in range(2):
             tls.sendall(struct.pack("!H", len(query)) + query)
             answer = exact(struct.unpack("!H", exact(2))[0])
-            assert answer[:2] == query[:2] and answer[3] & 15 == 0
+            assert answer[:2] == query[:2] and answer[3] & 15 == 0, {
+                "rcode": answer[3] & 15,
+                "wire": answer.hex(),
+            }
     status, answer, _ = request(
         connection["doh"].removeprefix("https://dns.example.com"),
         "POST",
@@ -275,6 +279,17 @@ if __name__ == "__main__":
         if os.environ.get("SMARTDNS_DISPOSABLE_INSTALL_TEST") == "1" and Path("/.dockerenv").exists():
             import sys
 
+            time.sleep(1)
+            subprocess.run(
+                ["curl", "-sS", "--max-time", "3", "http://127.0.0.1:3007/health"],
+                stdout=sys.stderr,
+                check=False,
+            )
+            subprocess.run(
+                ["systemctl", "show", "smartdns-api", "-p", "LoadCredential", "-p", "Environment"],
+                stdout=sys.stderr,
+                check=False,
+            )
             subprocess.run(
                 [
                     "curl",
