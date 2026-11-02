@@ -36,4 +36,4 @@ Create base and wildcard AAAA records only after IPv6 listeners, source admissio
 
 ## Certificates
 
-`/etc/smartdns/certificates.json` is root-owned, private configuration for Certbot directories, lineage, deployment paths and the gateway unit. Provider credentials are separate root-only files. `acme-dns.json` can specify an HTTPS `api_url` for a self-hosted provider.
+`/etc/smartdns/certificates.json` is root-owned, private configuration for Certbot directories, lineage, deployment paths and the gateway unit. Provider credentials are separate root-only files. `acme-dns.json` can specify an HTTPS `api_url` for a self-hosted provider. Optional `source_address` binds API requests to a local tunnel address when the provider is unreachable over the default route; configure that address's routing first. TLS verification remains enabled.
