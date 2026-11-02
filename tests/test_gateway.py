@@ -130,15 +130,6 @@ async def test_doh_get_post_and_spoofed_headers(stack, dns_stack):
         assert (await client.post("/dns-query/" + key, content=wire)).status_code == 415
 
 
-@pytest.mark.asyncio
-async def test_rotation_invalidates_existing_dns_key(stack, dns_stack):
-    gateway, key = dns_stack
-    assert await gateway.query(key, "8.8.8.8", dns.message.make_query("example.com", "A").to_wire())
-    stack["accounts"].rotate(stack["owner"]["id"])
-    with pytest.raises(PermissionError):
-        await gateway.query(key, "8.8.8.8", dns.message.make_query("example.com", "A").to_wire())
-
-
 def tls_files(tmp_path, domain):
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, domain)])
@@ -179,8 +170,8 @@ async def test_real_dot_multiple_frames_and_revoke_open_connection(stack, tmp_pa
         reader, writer = await asyncio.open_connection(
             "127.0.0.1", port, ssl=context, server_hostname=key + "." + settings.domain
         )
-        for domain in ["example.com", "cloudflare.com"]:
-            query = dns.message.make_query(domain, "A")
+        for domain in ["example.com", "cloudflare.com", "refused.example", "after-refusal.example"]:
+            query = dns.message.make_query(domain, "ANY" if domain == "refused.example" else "A")
             wire = query.to_wire()
             frame = struct.pack("!H", len(wire)) + wire
             writer.write(frame[:1])
@@ -190,7 +181,9 @@ async def test_real_dot_multiple_frames_and_revoke_open_connection(stack, tmp_pa
             await writer.drain()
             length = struct.unpack("!H", await asyncio.wait_for(reader.readexactly(2), 2))[0]
             response = dns.message.from_wire(await reader.readexactly(length))
-            assert response.id == query.id and response.rcode() == dns.rcode.NOERROR
+            assert response.id == query.id and response.rcode() == (
+                dns.rcode.REFUSED if domain == "refused.example" else dns.rcode.NOERROR
+            )
         stack["accounts"].status(stack["friend"]["id"], False)
         wire = dns.message.make_query("example.com", "A").to_wire()
         writer.write(struct.pack("!H", len(wire)) + wire)
@@ -257,50 +250,25 @@ async def test_legacy_plain_dns_requires_active_network_and_has_no_personal_stat
 
 
 @pytest.mark.asyncio
-async def test_gateway_reassigns_service_when_selected_exit_cannot_acknowledge(stack, dns_stack):
+async def test_rate_limit_is_a_dns_response_and_connectivity_bypasses_filter(stack, dns_stack):
     gateway, key = dns_stack
+    seen = []
+    resolver = Resolver()
+
+    async def post(url, **kwargs):
+        seen.append(url)
+        return await resolver.post(url, **kwargs)
+
+    gateway.upstream.post = post
     with stack["db"].connect() as db:
-        db.execute(
-            "INSERT INTO exits(id,name,ingress_ip,egress_ip,country) VALUES('second','Second','8.8.4.4','8.8.4.4','FI')"
-        )
-
-    async def grant(account_id, ip, exit_id, generation):
-        return exit_id == "second"
-
-    stack["agent"].grant = grant
-    response = dns.message.from_wire(
-        await gateway.query(key, "1.1.1.1", dns.message.make_query("chatgpt.com", "A").to_wire())
-    )
-    assert str(response.answer[0][0]) == "8.8.4.4"
-    assert gateway.pool.choose(stack["owner"]["id"], "openai")["id"] == "second"
-
-
-@pytest.mark.asyncio
-async def test_history_expires_without_further_dns_queries(stack, dns_stack, monkeypatch):
-    import time
-
-    gateway, _ = dns_stack
-    uid = stack["owner"]["id"]
-    with stack["db"].connect() as db:
-        db.execute(
-            "INSERT INTO dns_events(account_id,at,domain,qtype,result,elapsed_ms) VALUES(?,?,?,?,?,?)",
-            (uid, int(time.time()) - 86401, "expired.example", "A", "allowed", 1),
-        )
-    assert not stack["accounts"].stats(uid)["recent"]
-    loop = asyncio.get_running_loop()
-    cleaned = asyncio.Event()
-    original_flush = gateway.recorder.flush
-
-    def flush(rows):
-        original_flush(rows)
-        loop.call_soon_threadsafe(cleaned.set)
-
-    monkeypatch.setattr(gateway.recorder, "flush", flush)
-    task = asyncio.create_task(gateway.recorder.run())
-    try:
-        await asyncio.wait_for(cleaned.wait(), 5)
-        with stack["db"].connect(readonly=True) as db:
-            assert db.execute("SELECT COUNT(*) FROM dns_events").fetchone()[0] == 0
-    finally:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        db.execute("INSERT INTO domain_rules VALUES('gstatic.com','suffix','openai','fixture')")
+        stack["db"].bump(db)
+    q = dns.message.make_query("connectivitycheck.gstatic.com", "A")
+    response = dns.message.from_wire(await gateway.query(key, "8.8.8.8", q.to_wire()))
+    assert str(response.answer[0][0]) == "93.184.216.34"
+    assert seen == [stack["settings"].probe_resolver] and not stack["agent"].grants
+    gateway.rates[stack["owner"]["id"]] = (int(__import__("time").monotonic()), 100)
+    refused = dns.message.from_wire(await gateway.query(key, "8.8.8.8", q.to_wire()))
+    assert refused.id == q.id and refused.rcode() == dns.rcode.REFUSED
+    gateway.rates.clear()
+    assert dns.message.from_wire(await gateway.query(key, "8.8.8.8", q.to_wire())).answer

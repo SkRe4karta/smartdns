@@ -1,0 +1,32 @@
+http:
+  address: 127.0.0.1:3010
+  doh:
+    insecure_enabled: true
+users: []
+dns:
+  bind_hosts: [127.0.0.1]
+  port: 5354
+  upstream_dns: [https://1.1.1.1/dns-query, https://dns.google/dns-query]
+  bootstrap_dns: [1.1.1.1, 9.9.9.9]
+  allowed_clients: [127.0.0.1]
+  ratelimit: 300
+  cache_size: 8388608
+tls:
+  enabled: false
+querylog:
+  enabled: false
+statistics:
+  enabled: false
+filtering:
+  filtering_enabled: true
+  filters_update_interval: 24
+filters:
+  - enabled: true
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt
+    name: AdGuard DNS Filter
+    id: 1
+  - enabled: true
+    url: https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/pro.txt
+    name: HaGeZi Multi PRO
+    id: 2
+schema_version: 33

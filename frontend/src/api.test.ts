@@ -21,13 +21,11 @@ describe("authenticated API transport", () => {
   it("surfaces authorization failures", async () => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue({
-          ok: false,
-          status: 403,
-          json: async () => ({ detail: "Нет доступа" }),
-        }),
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({ detail: "Нет доступа" }),
+      }),
     );
     await expect(api("/admin/users")).rejects.toEqual(
       new APIError(403, "Нет доступа"),

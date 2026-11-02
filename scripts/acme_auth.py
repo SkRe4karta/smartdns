@@ -8,7 +8,9 @@ import time
 import urllib.request
 from pathlib import Path
 
-credentials = json.loads(Path("/opt/smartdns-smartdns-beta/secrets/acme-dns.json").read_text())
+credentials = json.loads(
+    Path(os.environ.get("ACME_DNS_CREDENTIALS", "/etc/smartdns/acme-dns.json")).read_text()
+)
 validation = os.environ["CERTBOT_VALIDATION"]
 request = urllib.request.Request(
     "https://auth.acme-dns.io/update",
@@ -24,7 +26,15 @@ with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310 -- f
         raise RuntimeError("ACME DNS update failed")
 for _ in range(60):
     result = subprocess.run(
-        ["dig", "@1.1.1.1", "+short", "+time=2", "+tries=1", "_acme-challenge.dns.example.com", "TXT"],
+        [
+            "dig",
+            "@1.1.1.1",
+            "+short",
+            "+time=2",
+            "+tries=1",
+            "_acme-challenge." + os.environ["CERTBOT_DOMAIN"].removeprefix("*."),
+            "TXT",
+        ],
         capture_output=True,
         text=True,
         timeout=5,

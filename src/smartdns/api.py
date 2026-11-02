@@ -3,17 +3,14 @@ import json
 import os
 import plistlib
 import sqlite3
-import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-import httpx
-import jwt
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import __version__
@@ -22,8 +19,7 @@ from .agent_client import AgentClient
 from .catalog import Catalog, CatalogImporter
 from .config import Settings
 from .db import Database
-from .oidc import TelegramOIDC
-from .security import digest, equal, normalize_domain, public_ipv4
+from .security import digest, equal, normalize_domain
 
 
 class Body(BaseModel):
@@ -35,17 +31,8 @@ class Login(Body):
     password: str = Field(min_length=1, max_length=256)
 
 
-class Token(Body):
-    token: str = Field(min_length=20, max_length=100)
-
-
-class Setup(Token):
-    password: str = Field(min_length=12, max_length=256)
-
-
 class NewUser(Body):
-    login: str = Field(min_length=3, max_length=40)
-    name: str = Field(min_length=1, max_length=100)
+    username: str = Field(min_length=3, max_length=40)
 
 
 class Enabled(Body):
@@ -60,25 +47,6 @@ class ExceptionRule(Body):
 class Password(Body):
     current: str | None = Field(default=None, max_length=256)
     new: str = Field(min_length=12, max_length=256)
-
-
-class TelegramStart(Body):
-    invite: str | None = Field(default=None, max_length=100)
-
-
-class NewExit(Body):
-    id: str = Field(pattern=r"^[a-z][a-z0-9-]{0,31}$")
-    name: str = Field(min_length=1, max_length=80)
-    ingress_ip: str = Field(max_length=45)
-    egress_ip: str = Field(max_length=45)
-    country: str = Field(pattern=r"^[A-Z]{2}$")
-    control_url: str | None = Field(default=None, max_length=200)
-
-
-class ExitUpdate(Body):
-    enabled: bool
-    draining: bool = False
-    allowed_services: list[str] = Field(default_factory=list, max_length=100)
 
 
 class Override(Body):
@@ -96,7 +64,7 @@ def apple_profile(connection: dict[str, Any], identifier: str) -> bytes:
         {
             "PayloadType": "Configuration",
             "PayloadVersion": 1,
-            "PayloadIdentifier": "org.smartdns.dns." + identifier,
+            "PayloadIdentifier": "org.smartdns.profile." + identifier,
             "PayloadUUID": uid("profile"),
             "PayloadDisplayName": "SmartDNS",
             "PayloadRemovalDisallowed": False,
@@ -104,7 +72,7 @@ def apple_profile(connection: dict[str, Any], identifier: str) -> bytes:
                 {
                     "PayloadType": "com.apple.dnsSettings.managed",
                     "PayloadVersion": 1,
-                    "PayloadIdentifier": "org.smartdns.dns." + identifier + ".dns",
+                    "PayloadIdentifier": "org.smartdns.profile." + identifier + ".dns",
                     "PayloadUUID": uid("dns"),
                     "PayloadDisplayName": "SmartDNS",
                     "DNSSettings": {
@@ -123,9 +91,8 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
     settings = settings or Settings.load()
     db = Database(settings.db_path)
     accounts = Accounts(settings, db)
-    catalog = Catalog(db, settings.domain)
+    catalog = Catalog(db, settings.domain, settings.reserved_sni)
     control = agent or AgentClient(settings)
-    telegram = TelegramOIDC(settings, accounts)
     refresh_lock = asyncio.Lock()
 
     @asynccontextmanager
@@ -134,7 +101,7 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
         await control.close()
 
     app = FastAPI(
-        title="SmartDNS DNS",
+        title="SmartDNS",
         version=__version__,
         lifespan=lifespan,
         docs_url=None,
@@ -177,7 +144,7 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
     def current(request: Request) -> dict[str, Any]:
         account = accounts.authenticate(request.cookies.get("zd_session"))
         if not account:
-            raise HTTPException(401, "Войди в личный кабинет")
+            raise HTTPException(401, "Войди как администратор")
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             csrf = request.headers.get("x-csrf-token", "")
             if not equal(csrf, account["csrf"]):
@@ -216,26 +183,6 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
     async def health() -> dict[str, Any]:
         return {"version": __version__, "ready": True}
 
-    @app.get("/api/v1/auth/options")
-    async def options() -> dict[str, Any]:
-        return {"telegram": bool(telegram.credentials()), "version": __version__}
-
-    @app.post("/api/v1/auth/invitation")
-    def invitation(body: Token, request: Request) -> dict[str, Any]:
-        rate(request, "invite", 100)
-        info = accounts.invite_info(body.token)
-        if not info:
-            raise HTTPException(404, "Ссылка недействительна или уже использована")
-        return info
-
-    @app.post("/api/v1/auth/setup")
-    async def setup(body: Setup, request: Request, response: Response) -> dict[str, Any]:
-        rate(request, "setup", 30)
-        session = await asyncio.to_thread(accounts.setup, body.token, body.password)
-        await control.reconcile()
-        cookie(response, session)
-        return {"ok": True}
-
     @app.post("/api/v1/auth/login")
     async def login(body: Login, request: Request, response: Response) -> dict[str, Any]:
         rate(request, "login", 100)
@@ -246,38 +193,6 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
             raise HTTPException(401, "Неверный логин или пароль")
         cookie(response, session)
         return {"ok": True}
-
-    @app.post("/api/v1/auth/telegram/start")
-    def telegram_start(body: TelegramStart, request: Request, response: Response) -> dict[str, Any]:
-        rate(request, "telegram", 60)
-        account = accounts.authenticate(request.cookies.get("zd_session"))
-        if account and not equal(request.headers.get("x-csrf-token", ""), account["csrf"]):
-            raise HTTPException(403, "Недействительный CSRF-токен")
-        url, browser = telegram.start(account_id=account["id"] if account else None, invite=body.invite)
-        response.set_cookie(
-            "zd_oauth",
-            browser,
-            max_age=600,
-            httponly=True,
-            secure=not settings.test_mode,
-            samesite="lax",
-            path="/api/v1/auth/telegram",
-        )
-        return {"url": url}
-
-    @app.get("/api/v1/auth/telegram/callback")
-    async def telegram_callback(request: Request, code: str = "", state: str = "") -> RedirectResponse:
-        try:
-            session = await telegram.callback(
-                code, state, request.cookies.get("zd_oauth", ""), request.cookies.get("zd_session")
-            )
-            await control.reconcile()
-        except ValueError, KeyError, jwt.PyJWTError, httpx.HTTPError:
-            return RedirectResponse("/login?error=telegram", status_code=303)
-        response = RedirectResponse("/app", status_code=303)
-        cookie(response, session)
-        response.delete_cookie("zd_oauth", path="/api/v1/auth/telegram")
-        return response
 
     @app.post("/api/v1/auth/logout")
     def logout(user: User, response: Response) -> dict[str, Any]:
@@ -301,15 +216,6 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
         db.audit(user["id"], "password.changed", user["id"])
         return {"ok": True}
 
-    @app.delete("/api/v1/auth/telegram")
-    def unlink(user: User) -> dict[str, Any]:
-        if not user["password_hash"]:
-            raise ValueError("Сначала установи пароль")
-        with db.connect() as connection:
-            connection.execute("UPDATE accounts SET telegram_sub=NULL WHERE id=?", (user["id"],))
-        db.audit(user["id"], "telegram.unlinked", user["id"])
-        return {"ok": True}
-
     @app.get("/api/v1/me")
     async def me(user: User) -> dict[str, Any]:
         return {
@@ -320,67 +226,16 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
             "filtering": bool(user["filtering"]),
             "last_dns": user["last_dns"],
             "csrf": user["csrf"],
-            "telegram_linked": bool(user["telegram_sub"]),
             "has_password": bool(user["password_hash"]),
             "agent": await control.status(),
             "version": __version__,
         }
-
-    @app.get("/api/v1/me/connection")
-    def connection(user: User) -> dict[str, Any]:
-        return accounts.connection(user["id"])
-
-    @app.get("/api/v1/me/profile.mobileconfig")
-    def profile(user: User) -> Response:
-        return Response(
-            apple_profile(accounts.connection(user["id"]), user["id"]),
-            media_type="application/x-apple-aspen-config",
-            headers={"Content-Disposition": 'attachment; filename="smartdns-dns.mobileconfig"'},
-        )
-
-    @app.post("/api/v1/me/rotate-key")
-    async def rotate(user: User) -> dict[str, Any]:
-        accounts.rotate(user["id"])
-        await control.reconcile()
-        db.audit(user["id"], "dns-key.rotated", user["id"])
-        return accounts.connection(user["id"])
 
     @app.get("/api/v1/me/stats")
     def statistics(user: User, days: int = 1) -> dict[str, Any]:
         if days not in (1, 7):
             raise HTTPException(400, "Период должен составлять один или семь дней")
         return accounts.stats(user["id"], days)
-
-    @app.get("/api/v1/me/filtering")
-    def filtering(user: User) -> dict[str, Any]:
-        with db.connect(readonly=True) as connection:
-            rules = [
-                dict(r)
-                for r in connection.execute(
-                    "SELECT domain,action FROM exceptions WHERE account_id=? ORDER BY domain", (user["id"],)
-                )
-            ]
-        return {"enabled": bool(user["filtering"]), "exceptions": rules}
-
-    @app.put("/api/v1/me/filtering")
-    async def update_filter(body: Enabled, user: User) -> dict[str, Any]:
-        with db.connect() as connection:
-            connection.execute("UPDATE accounts SET filtering=? WHERE id=?", (int(body.enabled), user["id"]))
-            db.bump(connection)
-        await control.reconcile()
-        return {"ok": True}
-
-    @app.post("/api/v1/me/exceptions")
-    async def add_exception(body: ExceptionRule, user: User) -> dict[str, Any]:
-        accounts.exception(user["id"], body.domain, body.action)
-        await control.reconcile()
-        return {"ok": True}
-
-    @app.delete("/api/v1/me/exceptions/{domain}")
-    async def delete_exception(domain: str, user: User) -> dict[str, Any]:
-        accounts.exception(user["id"], domain, None)
-        await control.reconcile()
-        return {"ok": True}
 
     @app.get("/api/v1/catalog")
     def services(user: User) -> dict[str, Any]:
@@ -391,8 +246,9 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
         return {"users": accounts.list(), "limit": settings.user_limit}
 
     @app.post("/api/v1/admin/users", status_code=201)
-    def new_user(body: NewUser, user: Admin) -> dict[str, Any]:
-        result = accounts.create(body.login, body.name)
+    async def new_user(body: NewUser, user: Admin) -> dict[str, Any]:
+        result = accounts.create(body.username)
+        await control.reconcile()
         db.audit(user["id"], "user.created", result["id"])
         return result
 
@@ -402,12 +258,6 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
         await control.reconcile()
         db.audit(user["id"], "user.enabled" if body.enabled else "user.disabled", account_id)
         return {"ok": True}
-
-    @app.post("/api/v1/admin/users/{account_id}/recovery")
-    def recovery(account_id: str, user: Admin) -> dict[str, Any]:
-        url = accounts.invite(account_id, recovery=True)
-        db.audit(user["id"], "user.recovery-issued", account_id)
-        return {"setup_url": url}
 
     @app.post("/api/v1/admin/users/{account_id}/rotate-key")
     async def admin_rotate(account_id: str, user: Admin) -> dict[str, Any]:
@@ -419,96 +269,92 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
         db.audit(user["id"], "dns-key.rotated-by-admin", account_id)
         return {"ok": True}
 
-    @app.get("/api/v1/admin/exits")
-    def exits(user: Admin) -> dict[str, Any]:
+    def target(account_id: str) -> dict[str, Any]:
         with db.connect(readonly=True) as connection:
-            rows = [dict(r) for r in connection.execute("SELECT * FROM exits ORDER BY id")]
-        for row in rows:
-            row["allowed_services"] = json.loads(row["allowed_services"])
-        return {"exits": rows}
+            row = connection.execute(
+                "SELECT id,login,role,status,filtering,last_dns FROM accounts WHERE id=?", (account_id,)
+            ).fetchone()
+        if not row:
+            raise HTTPException(404, "Пользователь не найден")
+        return dict(row)
 
-    @app.post("/api/v1/admin/exits", status_code=201)
-    def new_exit(body: NewExit, user: Admin) -> dict[str, Any]:
-        ingress, egress = public_ipv4(body.ingress_ip), public_ipv4(body.egress_ip)
-        if body.control_url:
-            from urllib.parse import urlparse
+    @app.get("/api/v1/admin/users/{account_id}")
+    def user_details(account_id: str, user: Admin, days: int = 1) -> dict[str, Any]:
+        if days not in (1, 7):
+            raise HTTPException(400, "Период должен составлять один или семь дней")
+        data = target(account_id)
+        with db.connect(readonly=True) as connection:
+            data["exceptions"] = [
+                dict(r)
+                for r in connection.execute(
+                    "SELECT domain,action FROM exceptions WHERE account_id=? ORDER BY domain", (account_id,)
+                )
+            ]
+        return {"user": data, "stats": accounts.stats(account_id, days)}
 
-            parsed = urlparse(body.control_url)
-            if (
-                parsed.scheme != "https"
-                or parsed.username
-                or parsed.password
-                or parsed.query
-                or parsed.fragment
-                or parsed.path not in ("", "/")
-                or public_ipv4(parsed.hostname or "") != ingress
-            ):
-                raise ValueError("Укажи HTTPS-адрес агента по входному IPv4, без пути, логина и параметров")
+    @app.get("/api/v1/admin/users/{account_id}/connection")
+    def admin_connection(account_id: str, user: Admin) -> dict[str, Any]:
+        target(account_id)
+        return accounts.connection(account_id)
+
+    @app.get("/api/v1/admin/users/{account_id}/profile.mobileconfig")
+    def admin_profile(account_id: str, user: Admin) -> Response:
+        target(account_id)
+        return Response(
+            apple_profile(accounts.connection(account_id), account_id),
+            media_type="application/x-apple-aspen-config",
+            headers={
+                "Content-Disposition": 'attachment; filename="smartdns.mobileconfig"',
+                "Cache-Control": "no-store",
+            },
+        )
+
+    @app.put("/api/v1/admin/users/{account_id}/filtering")
+    async def admin_filtering(account_id: str, body: Enabled, user: Admin) -> dict[str, Any]:
+        target(account_id)
         with db.connect() as connection:
-            if connection.execute("SELECT COUNT(*) FROM exits").fetchone()[0] >= 8:
-                raise ValueError("В бете поддерживается до восьми выходов")
-            connection.execute(
-                "INSERT INTO exits(id,name,ingress_ip,egress_ip,country,enabled,healthy,control_url) VALUES(?,?,?,?,?,0,0,?)",
-                (body.id, body.name, ingress, egress, body.country, body.control_url),
-            )
-            db.bump(connection)
-        db.audit(user["id"], "exit.created", body.id)
-        return {
-            "ok": True,
-            "message": "Выход добавлен отключённым; подключи сертификаты агента и проверь его",
-        }
-
-    @app.patch("/api/v1/admin/exits/{exit_id}")
-    async def update_exit(exit_id: str, body: ExitUpdate, user: Admin) -> dict[str, Any]:
-        with db.connect() as connection:
-            row = connection.execute("SELECT * FROM exits WHERE id=?", (exit_id,)).fetchone()
-            if not row:
-                raise HTTPException(404, "Выход не найден")
-            for service_id in body.allowed_services:
-                if not connection.execute("SELECT 1 FROM services WHERE id=?", (service_id,)).fetchone():
-                    raise ValueError("Неизвестный сервис")
-            if body.enabled and not row["healthy"]:
-                raise ValueError("Сначала проверь агент и фактический выходной IP")
-            connection.execute(
-                "UPDATE exits SET enabled=?,draining=?,allowed_services=? WHERE id=?",
-                (int(body.enabled), int(body.draining), json.dumps(body.allowed_services), exit_id),
-            )
+            connection.execute("UPDATE accounts SET filtering=? WHERE id=?", (int(body.enabled), account_id))
             db.bump(connection)
         await control.reconcile()
-        db.audit(user["id"], "exit.updated", exit_id, enabled=body.enabled, draining=body.draining)
+        db.audit(user["id"], "user.filtering-changed", account_id, enabled=body.enabled)
         return {"ok": True}
 
-    @app.post("/api/v1/admin/exits/{exit_id}/check")
-    async def check_exit(exit_id: str, user: Admin) -> dict[str, Any]:
-        with db.connect(readonly=True) as connection:
-            row = connection.execute("SELECT * FROM exits WHERE id=?", (exit_id,)).fetchone()
-        if not row:
-            raise HTTPException(404, "Выход не найден")
-        try:
-            status = await control.check_exit(exit_id)
-        except httpx.HTTPError as exc:
-            raise HTTPException(503, "Агент недоступен") from exc
-        healthy = bool(
-            status.get("ready") is True
-            and status.get("ingress_ip") == row["ingress_ip"]
-            and status.get("egress_ip") == row["egress_ip"]
+    @app.post("/api/v1/admin/users/{account_id}/exceptions")
+    async def admin_exception(account_id: str, body: ExceptionRule, user: Admin) -> dict[str, Any]:
+        target(account_id)
+        accounts.exception(account_id, body.domain, body.action)
+        await control.reconcile()
+        db.audit(
+            user["id"], "user.exception-changed", account_id, domain=body.domain, rule_action=body.action
         )
-        with db.connect() as connection:
-            connection.execute("UPDATE exits SET healthy=? WHERE id=?", (int(healthy), exit_id))
-            db.bump(connection)
-        db.audit(user["id"], "exit.checked", exit_id, healthy=healthy)
-        return {"healthy": healthy}
+        return {"ok": True}
+
+    @app.delete("/api/v1/admin/users/{account_id}/exceptions/{domain}")
+    async def admin_delete_exception(account_id: str, domain: str, user: Admin) -> dict[str, Any]:
+        target(account_id)
+        accounts.exception(account_id, domain, None)
+        await control.reconcile()
+        db.audit(user["id"], "user.exception-deleted", account_id, domain=domain)
+        return {"ok": True}
 
     @app.get("/api/v1/admin/catalog")
     def admin_catalog(user: Admin) -> dict[str, Any]:
         with db.connect(readonly=True) as connection:
+            hidden = {r[0] for r in connection.execute("SELECT id FROM services WHERE hidden=1")}
             meta = {
                 r["key"]: json.loads(r["value"])
                 for r in connection.execute("SELECT * FROM metadata WHERE key LIKE 'catalog_%'")
             }
-            overrides = [dict(r) for r in connection.execute("SELECT * FROM route_overrides ORDER BY domain")]
+            meta.pop("catalog_skipped", None)
+            overrides = [
+                dict(r)
+                for r in connection.execute("SELECT * FROM route_overrides ORDER BY domain")
+                if r["service_id"] not in hidden and not catalog.protected(r["domain"])
+            ]
             cidrs = [
-                dict(r) for r in connection.execute("SELECT * FROM service_cidrs ORDER BY service_id,cidr")
+                dict(r)
+                for r in connection.execute("SELECT * FROM service_cidrs ORDER BY service_id,cidr")
+                if r["service_id"] not in hidden
             ]
         return {
             "services": catalog.services(),
@@ -520,6 +366,8 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
 
     @app.patch("/api/v1/admin/catalog/{service_id}")
     async def catalog_status(service_id: str, body: Enabled, user: Admin) -> dict[str, Any]:
+        if catalog.protected_service(service_id):
+            raise HTTPException(404, "Сервис не найден")
         if refresh_lock.locked():
             raise HTTPException(409, "Каталог обновляется")
         with db.connect() as connection:
@@ -535,6 +383,10 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
     @app.post("/api/v1/admin/routes")
     async def route(body: Override, user: Admin) -> dict[str, Any]:
         domain = normalize_domain(body.domain)
+        if catalog.protected(domain, suffix=body.kind == "suffix") or catalog.protected_service(
+            body.service_id
+        ):
+            raise HTTPException(403, "Системное правило защищено")
         if body.action == "proxy" and (domain == settings.domain or domain.endswith("." + settings.domain)):
             raise ValueError("Нельзя направить адрес сервиса на самого себя")
         if refresh_lock.locked():
@@ -556,6 +408,8 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
 
     @app.delete("/api/v1/admin/routes/{kind}/{domain}")
     async def delete_route(kind: Literal["exact", "suffix"], domain: str, user: Admin) -> dict[str, Any]:
+        if catalog.protected(normalize_domain(domain), suffix=kind == "suffix"):
+            raise HTTPException(403, "Системное правило защищено")
         with db.connect() as connection:
             connection.execute(
                 "DELETE FROM route_overrides WHERE kind=? AND domain=?", (kind, normalize_domain(domain))
@@ -622,83 +476,22 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
         }
 
     # Compatibility endpoints accept only an old alpha capability for its original account.
-    def legacy(request: Request) -> dict[str, Any]:
-        auth = request.headers.get("authorization", "")
-        if not auth.startswith("Bearer "):
-            raise HTTPException(403, "Личная ссылка недействительна")
-        with db.connect(readonly=True) as connection:
-            row = connection.execute(
-                "SELECT a.* FROM legacy_access l JOIN accounts a ON a.id=l.account_id WHERE l.token_hash=? AND l.expires>? AND a.status='active'",
-                (digest(auth[7:]), int(time.time())),
-            ).fetchone()
-        if not row:
-            raise HTTPException(403, "Срок старой ссылки истёк или доступ отключён")
-        return dict(row)
 
-    @app.get("/api/status")
-    def legacy_status(request: Request) -> dict[str, Any]:
-        user = legacy(request)
-        with db.connect(readonly=True) as connection:
-            networks = [
-                dict(r)
-                for r in connection.execute(
-                    "SELECT ip,expires FROM legacy_networks WHERE account_id=? AND expires>?",
-                    (user["id"], int(time.time())),
-                )
-            ]
-        return {
-            "name": user["name"],
-            "dot": f"{user['id']}.{settings.domain}",
-            "doh": f"{settings.public_url}/dns-query/{user['id']}",
-            "networks": networks,
-        }
-
-    @app.post("/api/activate")
-    async def legacy_activate(request: Request) -> dict[str, Any]:
-        user = legacy(request)
-        rate(request, "legacy-activate", 30)
-        ip = public_ipv4(source(request))
-        with db.connect() as connection:
-            limit = connection.execute(
-                "SELECT MAX(expires) FROM legacy_access WHERE account_id=?", (user["id"],)
-            ).fetchone()[0]
-            expires = min(int(time.time()) + 7 * 86400, limit)
-            connection.execute(
-                "INSERT INTO legacy_networks VALUES(?,?,?) ON CONFLICT(account_id,ip) DO UPDATE SET expires=excluded.expires",
-                (user["id"], ip, expires),
-            )
-            db.bump(connection)
-        await control.reconcile()
-        return {"ip": ip, "expires": expires}
-
-    @app.post("/api/profile")
-    def legacy_profile(request: Request) -> Response:
-        user = legacy(request)
-        return Response(
-            apple_profile(
-                {"doh": f"{settings.public_url}/dns-query/{user['id']}", "bootstrap": settings.public_ipv4},
-                user["id"],
-            ),
-            media_type="application/x-apple-aspen-config",
-        )
-
-    @app.get("/connect")
-    def legacy_page() -> FileResponse:
-        return FileResponse(settings.legacy_dir / "portal.html", headers={"Cache-Control": "no-store"})
+    @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+    def missing_api(path: str) -> Response:
+        raise HTTPException(404, "Не найдено")
 
     @app.get("/{path:path}")
     def frontend(path: str) -> Response:
         if path.startswith(("api/", "dns-query")):
             raise HTTPException(404, "Не найдено")
-        if path in ("app.js", "app.css") and (settings.legacy_dir / path).is_file():
-            return FileResponse(settings.legacy_dir / path, headers={"Cache-Control": "no-store"})
         root = settings.frontend_dir.resolve()
         candidate = (root / path).resolve()
         if candidate.is_relative_to(root) and candidate.is_file():
             return FileResponse(candidate)
         if (root / "index.html").is_file():
             return FileResponse(root / "index.html", headers={"Cache-Control": "no-cache"})
-        return JSONResponse({"service": "SmartDNS DNS", "version": __version__})
+        return JSONResponse({"service": "SmartDNS", "version": __version__})
 
     return app
 

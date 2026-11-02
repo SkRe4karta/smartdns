@@ -33,7 +33,7 @@ def main() -> None:
         raise SystemExit("Commit all source changes before producing a release artifact")
     epoch = int(run(["git", "show", "-s", "--format=%ct", "HEAD"]))
     version = root.joinpath("VERSION").read_text().strip()
-    if version != "0.2.0-beta.1":
+    if version != "0.3.0-rc.1":
         raise SystemExit("Unexpected release version")
     if not root.joinpath("frontend/dist/index.html").is_file():
         raise SystemExit("Build the frontend first")
@@ -46,6 +46,9 @@ def main() -> None:
         ".python-version",
         ".node-version",
         "README.md",
+        "LICENSE",
+        "THIRD_PARTY_NOTICES.md",
+        "SECURITY.md",
         "VERSION",
         "pyproject.toml",
         "uv.lock",
@@ -55,10 +58,6 @@ def main() -> None:
     ]:
         path = root / name
         files[name] = (path.read_bytes(), path.stat().st_mode)
-    # Alpha UI assets are intentionally retained only for the compatibility route.
-    for name in ["portal.html", "app.js", "app.css"]:
-        path = root / name
-        files["legacy/" + name] = (path.read_bytes(), path.stat().st_mode)
     with tempfile.TemporaryDirectory(prefix="smartdns-wheel-") as directory:
         run(
             [args.uv, "build", "--wheel", "--out-dir", directory],

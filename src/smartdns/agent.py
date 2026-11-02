@@ -38,21 +38,17 @@ def atomic(path: Path, content: str) -> bool:
 
 
 class HostAdapter:
-    def __init__(self, root: Path, *, enabled: bool = True, node: bool = False) -> None:
+    def __init__(self, root: Path, *, enabled: bool = True, settings: Settings | None = None) -> None:
         self.root, self.enabled = root, enabled
         self.stats_socket = Path("/run/haproxy/smartdns-admin.sock")
         self.sources = Path("/etc/haproxy/smartdns-sources.acl")
         self.origins = Path("/etc/haproxy/smartdns-origins.acl")
         self.config_file = Path("/etc/haproxy/haproxy.cfg")
         self.service = "haproxy"
-        self.nft_table = "smartdns_smartdns"
-        if node:
-            self.stats_socket = Path("/run/smartdns-node/haproxy.sock")
-            self.sources = Path("/etc/smartdns-node/sources.acl")
-            self.origins = Path("/etc/smartdns-node/origins.acl")
-            self.config_file = Path("/etc/smartdns-node/haproxy.cfg")
-            self.service = "smartdns-node-haproxy"
-            self.nft_table = "smartdns_node"
+        self.nft_table = "smartdns"
+        if settings:
+            self.stats_socket = settings.haproxy_socket
+            self.nft_table = settings.nft_table
         self.current_sources: set[str] | None = None
 
     @staticmethod
@@ -141,8 +137,8 @@ class AgentEngine:
     def __init__(self, settings: Settings, adapter: HostAdapter, *, state_dir: Path | None = None) -> None:
         self.settings, self.adapter = settings, adapter
         self.db = Database(settings.db_path)
-        self.catalog = Catalog(self.db, settings.domain)
-        self.state_dir = state_dir or Path("/opt/smartdns-smartdns-beta/agent-state")
+        self.catalog = Catalog(self.db, settings.domain, settings.reserved_sni)
+        self.state_dir = state_dir or settings.agent_state_dir
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.leases = self.state_dir / "leases.sqlite3"
         self.lease_store = Database(self.leases)
@@ -239,7 +235,8 @@ class AgentEngine:
             for account_id in {r[0] for r in db.execute("SELECT DISTINCT account_id FROM leases")} - active:
                 db.execute("DELETE FROM leases WHERE account_id=?", (account_id,))
             rows = db.execute(
-                "SELECT ip,MAX(expires) FROM leases WHERE exit_id='fi-primary' GROUP BY ip"
+                "SELECT ip,MAX(expires) FROM leases WHERE exit_id=? GROUP BY ip",
+                (self.settings.local_exit_id,),
             ).fetchall()
         expiries = {ip: expiry for ip, expiry in rows}
         for net in legacy:
@@ -286,7 +283,12 @@ class AgentEngine:
                 exit_row = db.execute(
                     "SELECT * FROM exits WHERE id=? AND enabled=1 AND healthy=1", (exit_id,)
                 ).fetchone()
-            if not user or user["status"] != "active" or not exit_row:
+            if (
+                not user
+                or user["status"] != "active"
+                or not exit_row
+                or exit_id != self.settings.local_exit_id
+            ):
                 return False
             now = int(time.time())
             with self.lease_store.connect() as db:
@@ -294,104 +296,9 @@ class AgentEngine:
                     "INSERT INTO leases VALUES(?,?,?,?) ON CONFLICT(account_id,ip,exit_id) DO UPDATE SET expires=excluded.expires",
                     (account_id, ip, exit_id, now + self.settings.lease_seconds),
                 )
-            if exit_id != "fi-primary":
-                return bool((await self.remote_sync(dict(exit_row))).get("ready"))
             users, _, legacy = self.snapshot()
             await asyncio.to_thread(self.adapter.apply_sources, self.source_expiries(users, legacy))
             return True
-
-    async def remote_sync(self, exit_row: dict[str, Any]) -> dict[str, Any]:
-        import ssl
-        from urllib.parse import urlparse
-
-        exit_id = exit_row["id"]
-        if not isinstance(exit_id, str) or not EXIT_RE.fullmatch(exit_id):
-            return {"ready": False}
-        failed = {"ready": False, "ingress_ip": exit_row["ingress_ip"], "egress_ip": None}
-        url = exit_row.get("control_url")
-        if not url:
-            self.exit_health[exit_id] = failed
-            return failed
-        parsed = urlparse(url)
-        if (
-            parsed.scheme != "https"
-            or parsed.username
-            or parsed.password
-            or parsed.query
-            or parsed.fragment
-            or parsed.path not in ("", "/")
-        ):
-            self.exit_health[exit_id] = failed
-            return failed
-        if not self.settings.test_mode:
-            try:
-                if public_ipv4(parsed.hostname or "") != exit_row["ingress_ip"]:
-                    return failed
-            except ValueError:
-                return failed
-        credentials = self.state_dir / "nodes" / exit_id
-        if not all((credentials / name).is_file() for name in ("ca.pem", "client.pem", "client.key")):
-            self.exit_health[exit_id] = failed
-            return failed
-        try:
-            tls = ssl.create_default_context(cafile=str(credentials / "ca.pem"))
-            tls.load_cert_chain(credentials / "client.pem", credentials / "client.key")
-            with self.db.connect(readonly=True) as db:
-                active = {r[0] for r in db.execute("SELECT id FROM accounts WHERE status='active'")}
-            with self.lease_store.connect() as db:
-                leases = [
-                    {"account_id": uid, "ip": ip, "expires": expiry}
-                    for uid, ip, expiry in db.execute(
-                        "SELECT account_id,ip,expires FROM leases WHERE exit_id=? AND expires>?",
-                        (exit_id, int(time.time())),
-                    )
-                    if uid in active
-                ]
-            async with httpx.AsyncClient(verify=tls, timeout=3, trust_env=False) as client:
-                response = await client.post(
-                    url.rstrip("/") + "/sync",
-                    json={
-                        "generation": self.db.generation(),
-                        "leases": leases,
-                        "patterns": self.catalog.proxy_patterns(),
-                    },
-                )
-                response.raise_for_status()
-                status = response.json()
-                if not isinstance(status, dict):
-                    raise ValueError("Invalid node status")
-                status["ready"] = bool(
-                    status.get("ready") is True
-                    and status.get("ingress_ip") == exit_row["ingress_ip"]
-                    and status.get("egress_ip") == exit_row["egress_ip"]
-                )
-                status = {key: status.get(key) for key in ("ready", "ingress_ip", "egress_ip", "generation")}
-                status["checked_at"] = time.monotonic()
-                self.exit_health[exit_id] = status
-                return status
-        except httpx.HTTPError, ValueError, TypeError, OSError, ssl.SSLError:
-            self.exit_health[exit_id] = failed
-            return failed
-
-    async def check_exit(self, exit_id: str) -> dict[str, Any]:
-        with self.db.connect(readonly=True) as db:
-            row = db.execute("SELECT * FROM exits WHERE id=?", (exit_id,)).fetchone()
-        if not row:
-            raise ValueError("Unknown exit")
-        if exit_id == "fi-primary":
-            return {"ready": self.ready(), "ingress_ip": row["ingress_ip"], "egress_ip": row["egress_ip"]}
-        return await self.remote_sync(dict(row))
-
-    async def remote_loop(self) -> None:
-        while True:
-            if self.ready():
-                with self.db.connect(readonly=True) as db:
-                    rows = [
-                        dict(r)
-                        for r in db.execute("SELECT * FROM exits WHERE enabled=1 AND id!='fi-primary'")
-                    ]
-                await asyncio.gather(*(self.remote_sync(row) for row in rows))
-            await asyncio.sleep(3)
 
     async def loop(self) -> None:
         last_logged = None
@@ -414,11 +321,6 @@ class Grant(BaseModel):
     generation: int = Field(ge=1)
 
 
-class ExitCheck(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    exit_id: str = Field(pattern=r"^[a-z][a-z0-9-]{0,31}$")
-
-
 class Preview(BaseModel):
     model_config = ConfigDict(extra="forbid")
     patterns: list[str] = Field(max_length=100_000)
@@ -428,13 +330,11 @@ def create_agent(engine: AgentEngine) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         task = asyncio.create_task(engine.loop())
-        remote_task = asyncio.create_task(engine.remote_loop())
         try:
             yield
         finally:
             task.cancel()
-            remote_task.cancel()
-            await asyncio.gather(task, remote_task, return_exceptions=True)
+            await asyncio.gather(task, return_exceptions=True)
             await engine.http.aclose()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -467,10 +367,6 @@ def create_agent(engine: AgentEngine) -> FastAPI:
             raise HTTPException(403, "Grant denied")
         return {"ready": True}
 
-    @app.post("/check-exit")
-    async def check_exit(body: ExitCheck) -> dict[str, Any]:
-        return await engine.check_exit(body.exit_id)
-
     @app.post("/preview")
     async def preview(body: Preview) -> dict[str, Any]:
         try:
@@ -493,8 +389,8 @@ def create_agent(engine: AgentEngine) -> FastAPI:
 def main() -> None:
     settings = Settings.load()
     managed = os.environ.get("SMARTDNS_MANAGE_HOST") == "1"
-    state = Path(os.environ.get("SMARTDNS_AGENT_STATE", "/opt/smartdns-smartdns-beta/agent-state"))
-    engine = AgentEngine(settings, HostAdapter(state, enabled=managed), state_dir=state)
+    state = Path(os.environ.get("SMARTDNS_AGENT_STATE", str(settings.agent_state_dir)))
+    engine = AgentEngine(settings, HostAdapter(state, enabled=managed, settings=settings), state_dir=state)
     # Two private listeners: authenticated filesystem socket for RPC, loopback health-only listener.
     app = create_agent(engine)
 

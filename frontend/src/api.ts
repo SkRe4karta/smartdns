@@ -43,7 +43,6 @@ export type User = {
   csrf: string;
   filtering: boolean;
   last_dns: number | null;
-  telegram_linked: boolean;
   has_password: boolean;
   version: string;
   agent: { ready: boolean; error?: string };

@@ -1,0 +1,4 @@
+# Merge into persistent nftables configuration. Never flush an existing ruleset.
+table inet smartdns {
+ set activated_v4 { type ipv4_addr; flags timeout; }
+}

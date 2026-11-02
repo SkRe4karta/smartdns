@@ -4,19 +4,18 @@ build-backend = "hatchling.build"
 
 [project]
 name = "smartdns-dns"
-version = "0.2.0b1"
+version = "0.3.0rc1"
 description = "Account-based Smart DNS control plane and authenticated DNS gateway"
 requires-python = ">=3.14,<3.15"
 dependencies = [
   "fastapi>=0.115", "uvicorn>=0.34", "httpx>=0.28", "argon2-cffi>=25.1",
-  "cryptography>=46", "dnspython>=2.8", "PyJWT[crypto]>=2.10", "PyYAML>=6.0.2",
+  "cryptography>=46", "dnspython>=2.8", "PyYAML>=6.0.2",
 ]
 
 [project.scripts]
 smartdns = "smartdns.cli:main"
 smartdns-agent = "smartdns.agent:main"
 smartdns-gateway = "smartdns.gateway:main"
-smartdns-node = "smartdns.node:main"
 
 [dependency-groups]
 dev = ["pytest>=8.4", "pytest-asyncio>=1.2", "pytest-cov>=7", "ruff>=0.14", "mypy>=1.18", "pip-audit>=2.9", "types-PyYAML>=6"]
@@ -26,6 +25,7 @@ packages = ["src/smartdns"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "config/services.json" = "smartdns/data/services.json"
+"config/system-routes.json" = "smartdns/data/system-routes.json"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

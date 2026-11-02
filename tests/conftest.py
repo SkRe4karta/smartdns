@@ -6,6 +6,7 @@ from smartdns.accounts import Accounts
 from smartdns.api import create_app
 from smartdns.config import Settings
 from smartdns.db import Database
+from smartdns.security import hash_password
 
 
 class FakeAgent:
@@ -40,7 +41,8 @@ def stack(tmp_path):
     settings = Settings(
         data_dir=tmp_path / "data",
         master_key_file=key,
-        telegram_file=tmp_path / "telegram.json",
+        public_ipv4="203.0.113.10",
+        local_exit_id="primary",
         public_url="https://dns.example.test",
         frontend_dir=tmp_path / "frontend",
         test_mode=True,
@@ -51,13 +53,18 @@ def stack(tmp_path):
     accounts = Accounts(settings, database)
     owner = accounts.create("owner", "Owner", role="admin")
     friend = accounts.create("friend", "Friend")
-    owner_session = accounts.setup(owner["setup_url"].split("#")[1], "owner-password-12345")
-    friend_session = accounts.setup(friend["setup_url"].split("#")[1], "friend-password-12345")
+    with database.connect() as db:
+        db.execute(
+            "UPDATE accounts SET password_hash=? WHERE id=?",
+            (hash_password("owner-password-12345"), owner["id"]),
+        )
+        owner_session = accounts._session(db, owner["id"])
+        friend_session = accounts._session(db, friend["id"])
     with database.connect() as db:
         db.execute("INSERT INTO services(id,name,category) VALUES('openai','OpenAI','AI')")
         db.execute("INSERT INTO domain_rules VALUES('chatgpt.com','suffix','openai','fixture')")
         db.execute(
-            "INSERT INTO exits(id,name,ingress_ip,egress_ip,country) VALUES('fi-primary','Finland','203.0.113.10','203.0.113.10','FI')"
+            "INSERT INTO exits(id,name,ingress_ip,egress_ip,country) VALUES('primary','Local','203.0.113.10','203.0.113.10','FI')"
         )
     agent = FakeAgent()
     return {

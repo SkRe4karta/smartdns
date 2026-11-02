@@ -9,12 +9,11 @@ from typing import Any
 
 @dataclass(frozen=True)
 class Settings:
-    data_dir: Path = Path("/opt/smartdns-smartdns-beta/data")
+    data_dir: Path = Path("/var/lib/smartdns")
     public_url: str = ""
     public_ipv4: str = ""
     agent_socket: Path = Path("/run/smartdns/agent.sock")
-    master_key_file: Path = Path("/opt/smartdns-smartdns-beta/secrets/master.key")
-    telegram_file: Path = Path("/opt/smartdns-smartdns-beta/secrets/telegram.json")
+    master_key_file: Path = Path("/etc/smartdns/master.key")
     agh_url: str = "http://127.0.0.1:3010"
     agh_control_url: str = "http://127.0.0.1:3010"
     api_port: int = 3008
@@ -22,10 +21,15 @@ class Settings:
     dot_port: int = 853
     plain_dns_enabled: bool = False
     plain_dns_port: int = 53
-    cert_file: Path = Path("/opt/smartdns-smartdns-beta/certs/fullchain.pem")
-    key_file: Path = Path("/opt/smartdns-smartdns-beta/certs/privkey.pem")
-    frontend_dir: Path = Path("/opt/smartdns-smartdns-beta/current/frontend/dist")
-    legacy_dir: Path = Path("/opt/smartdns-smartdns-beta/legacy")
+    cert_file: Path = Path("/etc/smartdns/certs/fullchain.pem")
+    key_file: Path = Path("/etc/smartdns/certs/privkey.pem")
+    frontend_dir: Path = Path("/opt/smartdns/current/frontend/dist")
+    local_exit_id: str = "primary"
+    reserved_sni: tuple[str, ...] = ()
+    agent_state_dir: Path = Path("/var/lib/smartdns-agent")
+    haproxy_socket: Path = Path("/run/haproxy/smartdns-admin.sock")
+    nft_table: str = "smartdns"
+    probe_resolver: str = "https://1.1.1.1/dns-query"
     session_days: int = 30
     user_limit: int = 30
     lease_seconds: int = 1800
@@ -66,16 +70,30 @@ class Settings:
             raise ValueError("test_mode cannot be enabled in a deployed configuration")
         credential_dir = os.environ.get("CREDENTIALS_DIRECTORY")
         if credential_dir:
-            for field, filename in [("master_key_file", "master.key"), ("telegram_file", "telegram.json")]:
+            for field, filename in [("master_key_file", "master.key")]:
                 p = Path(credential_dir) / filename
                 if p.exists():
                     raw[field] = p
         result = cls(**raw)
-        from urllib.parse import urlparse
         import ipaddress
+        from urllib.parse import urlparse
+
         url = urlparse(result.public_url)
-        if url.scheme != "https" or not url.hostname or url.path not in ("", "/") or url.query or url.fragment:
+        if (
+            url.scheme != "https"
+            or not url.hostname
+            or url.path not in ("", "/")
+            or url.username
+            or url.password
+            or url.query
+            or url.fragment
+        ):
             raise ValueError("Configure public_url as an HTTPS origin")
-        if not ipaddress.ip_address(result.public_ipv4).is_global:
+        if not result.public_ipv4:
+            raise ValueError("Configure public_ipv4 with the installation public IPv4")
+        if (
+            ipaddress.ip_address(result.public_ipv4).version != 4
+            or not ipaddress.ip_address(result.public_ipv4).is_global
+        ):
             raise ValueError("Configure a real public_ipv4; documentation addresses are not deployments")
         return result
