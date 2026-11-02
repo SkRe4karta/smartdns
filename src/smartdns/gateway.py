@@ -92,11 +92,13 @@ class Gateway:
                 ).fetchone()
             if not permitted:
                 return False
-            return bool(await self.agent.grant(account["id"], source, exit_id, generation))
+            return bool(
+                await self.agent.grant(account["id"], source, exit_id, generation, account.get("version", 0))
+            )
         cache_key = (account["id"], source, exit_id, generation)
         if self.lease_cache.get(cache_key, 0) > time.monotonic():
             return bool(await self.agent.is_ready(exit_id))
-        if await self.agent.grant(account["id"], source, exit_id, generation):
+        if await self.agent.grant(account["id"], source, exit_id, generation, account.get("version", 0)):
             if len(self.lease_cache) > 10000:
                 self.lease_cache = {k: v for k, v in self.lease_cache.items() if v > time.monotonic()}
             self.lease_cache[cache_key] = time.monotonic() + 30

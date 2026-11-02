@@ -14,7 +14,7 @@ class FakeAgent:
         self.ready = True
         self.grants = []
 
-    async def grant(self, account_id, ip, exit_id, generation):
+    async def grant(self, account_id, ip, exit_id, generation, credential_version=0):
         self.grants.append((account_id, ip, exit_id, generation))
         return self.ready
 

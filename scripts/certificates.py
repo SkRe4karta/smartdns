@@ -8,13 +8,29 @@ import fcntl
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import time
 from pathlib import Path
 
 
 def run(args: list[str]) -> str:
-    return subprocess.run(args, check=True, text=True, capture_output=True, timeout=110).stdout
+    with subprocess.Popen(
+        args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True
+    ) as process:
+        try:
+            output, error = process.communicate(timeout=110)
+        except BaseException:
+            os.killpg(process.pid, signal.SIGTERM)
+            try:
+                process.communicate(timeout=3)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.communicate()
+            raise
+        if process.returncode:
+            raise subprocess.CalledProcessError(process.returncode, args, output, error)
+        return output
 
 
 def main() -> None:

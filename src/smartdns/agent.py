@@ -336,7 +336,9 @@ class AgentEngine:
                 self.last_error = type(e).__name__
                 raise
 
-    async def grant(self, account_id: str, ip: str, exit_id: str, generation: int) -> bool:
+    async def grant(
+        self, account_id: str, ip: str, exit_id: str, generation: int, credential_version: int | None = None
+    ) -> bool:
         if not ACCOUNT_RE.fullmatch(account_id) or not EXIT_RE.fullmatch(exit_id):
             return False
         ip = public_ip(ip)
@@ -359,6 +361,17 @@ class AgentEngine:
                 or exit_id != self.settings.local_exit_id
             ):
                 return False
+            if credential_version is not None:
+                if credential_version == 0:
+                    with self.db.connect(readonly=True) as db:
+                        allowed = db.execute(
+                            "SELECT 1 FROM legacy_networks n WHERE n.account_id=? AND n.ip=? AND n.expires>? AND EXISTS(SELECT 1 FROM legacy_access l WHERE l.account_id=n.account_id AND l.expires>?)",
+                            (account_id, ip, int(time.time()), int(time.time())),
+                        ).fetchone()
+                    if not allowed:
+                        return False
+                elif credential_version != user["version"]:
+                    return False
             now = int(time.time())
             with self.lease_store.connect() as db:
                 count = db.execute(
@@ -396,6 +409,7 @@ class Grant(BaseModel):
     ip: str = Field(max_length=45)
     exit_id: str = Field(pattern=r"^[a-z][a-z0-9-]{0,31}$")
     generation: int = Field(ge=1)
+    credential_version: int = Field(ge=0)
 
 
 class Preview(BaseModel):
@@ -448,7 +462,9 @@ def create_agent(engine: AgentEngine) -> FastAPI:
     @app.post("/grant")
     async def grant(body: Grant) -> dict[str, Any]:
         try:
-            ready = await engine.grant(body.account_id, body.ip, body.exit_id, body.generation)
+            ready = await engine.grant(
+                body.account_id, body.ip, body.exit_id, body.generation, body.credential_version
+            )
         except (ValueError, OSError, httpx.HTTPError, subprocess.SubprocessError) as e:
             raise HTTPException(503, "Agent operation failed") from e
         if not ready:
