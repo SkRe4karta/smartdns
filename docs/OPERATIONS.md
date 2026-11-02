@@ -41,3 +41,25 @@ Exact connectivity probes in `src/smartdns/policy.py` always bypass imported rou
 Android Private DNS is a DNS setting, not a VPN. With a real VPN, its client may override DNS or change the HTTPS source address independently. DNS authorization and redirected HTTPS must use the same public egress. Reconnect DNS after switching networks, and configure the VPN's DNS policy consistently. Universal compatibility with untested VPN apps is not claimed; never open proxy access globally as a workaround.
 
 Sources: [Samsung connectivity probes](https://docs.samsungknox.com/admin/knox-platform-for-enterprise/kbas/kba-838-connected-without-internet-status-after-connecting-to-wifi/), [Android Private DNS and VPN behavior](https://developers.google.com/speed/public-dns/docs/using/), [OpenAI network requirements](https://help.openai.com/en/articles/9247338-network-recommendations-for-chatgpt-errors-on-web-and-apps).
+
+## DNS errors and source addresses
+
+Open Diagnostics for global errors; open a user card for network history, current admissions, version and that user's events. Full events last 24 hours; IP/time summaries last seven days. A shared credential aggregates all its devices; a shared public IP is not a device identifier. Admission expiry is distinct from historical activity. Unknown credentials are recorded without raw keys and cannot be assigned to a known user.
+
+Recorder queue drops/write errors are visible in diagnostics. Investigate disk capacity, filesystem errors and SQLite contention; do not hide failures by increasing retention without bounds. Administrative endpoints require an administrator session and mutating actions require CSRF.
+
+## TOTP recovery
+
+Use a new TOTP code or one-use recovery code at login. Setup confirmation consumes that 30-second code; wait for a fresh code before logging in again. Secrets are encrypted; recovery codes are shown once and stored hashed. Root can recover a locked-out administrator:
+
+```sh
+sudo env SMARTDNS_CONFIG=/etc/smartdns/settings.json /opt/smartdns/current/venv/bin/smartdns reset-totp admin
+```
+
+This revokes administrator sessions and second-factor material, and records the action. DNS profiles are preserved. Resetting the password alone does not disable TOTP.
+
+## Renewal and route policy
+
+The certificate timer renews only the configured lineage, reports failures and atomically switches the managed certificate pair. The gateway reloads TLS for new handshakes. Run `scripts/certificates.py dry-run` for ACME validation and `apply` to exercise deployment of the active production certificate. A staging certificate is not installed.
+
+Tunnel mode uses a configured source/interface, unreachable fallback and output guard. Verify the expected exit before reopening admission. The QUIC rejection applies only to SmartDNS ingress addresses; preserve other services' UDP listeners. Do not broadly change MTU, routing or firewall allowances without evidence.

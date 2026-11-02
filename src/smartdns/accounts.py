@@ -63,7 +63,7 @@ class Accounts:
         )
         return token, csrf
 
-    def login(self, login: str, password: str) -> tuple[str, str] | None:
+    def login(self, login: str, password: str) -> tuple[str, str] | dict[str, str] | None:
         with self.db.connect(readonly=True) as db:
             row = db.execute(
                 "SELECT * FROM accounts WHERE login=? COLLATE NOCASE", (login.strip(),)
@@ -83,6 +83,17 @@ class Accounts:
             ).fetchone()
             if not current or current["status"] != "active" or current["password_hash"] != encoded:
                 return None
+            if db.execute("SELECT 1 FROM totp WHERE account_id=? AND enabled=1", (row["id"],)).fetchone():
+                challenge = new_token()
+                db.execute(
+                    "DELETE FROM login_challenges WHERE expires<=? OR account_id=?",
+                    (int(time.time()), row["id"]),
+                )
+                db.execute(
+                    "INSERT INTO login_challenges VALUES(?,?,?)",
+                    (digest(challenge), row["id"], int(time.time()) + 300),
+                )
+                return {"challenge": challenge}
             return self._session(db, row["id"])
 
     def authenticate(self, token: str | None) -> dict[str, Any] | None:
@@ -108,6 +119,7 @@ class Accounts:
             "dot": f"{key}.{self.settings.domain}",
             "doh": f"{self.settings.public_url}/dns-query/{key}",
             "bootstrap": self.settings.public_ipv4,
+            "bootstrap_ipv6": self.settings.public_ipv6 or None,
             "version": row["version"],
         }
 
@@ -131,6 +143,7 @@ class Accounts:
         encoded = hash_password(new)
         with self.db.connect() as db:
             db.execute("UPDATE accounts SET password_hash=? WHERE id=?", (encoded, account_id))
+            db.execute("DELETE FROM login_challenges WHERE account_id=?", (account_id,))
             db.execute(
                 "DELETE FROM sessions WHERE account_id=? AND token_hash!=?", (account_id, session_hash)
             )

@@ -1,0 +1,10 @@
+[Unit]
+Description=SmartDNS certificate renewal and deployment
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/opt/smartdns/current/scripts/renew_certificate.sh
+User=root
+UMask=0077
+PrivateTmp=yes

@@ -96,6 +96,34 @@ def main() -> None:
                 ).fetchall()
             )
             assert db.execute("SELECT COUNT(*) FROM accounts WHERE status='invited'").fetchone()[0] == 0
+        # Reconstruct the real v2 event schema, then upgrade without replacing credentials or history.
+        with sqlite3.connect(root / "data/application.sqlite3") as db:
+            db.execute("DELETE FROM schema_migrations WHERE version=3")
+            db.execute("DROP INDEX dns_events_ip_time")
+            for column in ("client_ip", "transport", "key_version", "rcode", "reason"):
+                db.execute(f"ALTER TABLE dns_events DROP COLUMN {column}")
+            for table in ("network_buckets", "recovery_codes", "totp", "login_challenges"):
+                db.execute("DROP TABLE " + table)  # noqa: S608 -- local constant table list
+            account = db.execute("SELECT id FROM accounts LIMIT 1").fetchone()[0]
+            db.execute(
+                "INSERT INTO dns_events(account_id,at,domain,qtype,result,elapsed_ms) VALUES(?,1,'migration.example','A','allowed',3)",
+                (account,),
+            )
+            saved = db.execute(
+                "SELECT secret_hash,encrypted_secret,version FROM credentials ORDER BY account_id"
+            ).fetchall()
+        cli("init")
+        with sqlite3.connect(root / "data/application.sqlite3") as db:
+            assert (
+                saved
+                == db.execute(
+                    "SELECT secret_hash,encrypted_secret,version FROM credentials ORDER BY account_id"
+                ).fetchall()
+            )
+            assert db.execute(
+                "SELECT domain,client_ip,reason FROM dns_events WHERE domain='migration.example'"
+            ).fetchone() == ("migration.example", None, None)
+            assert db.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 3
         cli("backup", str(root / "backup.sqlite3"))
         with sqlite3.connect(root / "backup.sqlite3") as db:
             assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
@@ -149,6 +177,7 @@ def main() -> None:
                 {
                     "clean_install": "passed",
                     "alpha_migration": "passed",
+                    "v2_v3_key_preservation": "passed",
                     "sqlite_backup_restore": "passed",
                     "commit": manifest["commit"],
                     "version": manifest["version"],

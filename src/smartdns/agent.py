@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
+import ipaddress
 import logging
 import os
 import re
@@ -20,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .catalog import Catalog
 from .config import Settings
 from .db import Database
-from .security import ACCOUNT_RE, EXIT_RE, normalize_domain, public_ipv4
+from .security import ACCOUNT_RE, EXIT_RE, normalize_domain, public_ip, public_ipv4
 
 
 def atomic(path: Path, content: str) -> bool:
@@ -50,6 +53,7 @@ class HostAdapter:
             self.stats_socket = settings.haproxy_socket
             self.nft_table = settings.nft_table
         self.current_sources: set[str] | None = None
+        self.current_expiries: dict[str, int] | None = None
 
     @staticmethod
     def run(args: list[str], **kwargs: Any) -> str:
@@ -88,19 +92,43 @@ class HostAdapter:
         atomic(preview_config, config.replace(str(self.origins), str(candidate)))
         self.run(["haproxy", "-c", "-f", str(preview_config)])
 
+    def replace_acl(self, path: Path, patterns: list[str]) -> None:
+        reply = self.runtime("prepare acl " + str(path))
+        match = re.search(r"New version created: (\d+)", reply)
+        if not match:
+            raise RuntimeError("HAProxy ACL transaction unavailable")
+        version = match[1]
+        reply = self.runtime(f"clear acl @{version} {path}")
+        if reply.strip():
+            raise RuntimeError("HAProxy ACL prepare failed")
+        # ACL insertion has no multiline payload form. Batch bounded CLI commands instead.
+        batch: list[str] = []
+        size = 0
+        for pattern in patterns:
+            # HAProxy's CLI consumes backslash escapes before compiling the regex.
+            # Preserve literal dots/hyphens, so lookalike domains never gain admission.
+            escaped = pattern.replace("\\", "\\\\")
+            command = f"add acl @{version} {path} {escaped}"
+            if size + len(command) > 6000 and batch:
+                if self.runtime(";".join(batch)).strip():
+                    raise RuntimeError("HAProxy ACL insertion failed")
+                batch, size = [], 0
+            batch.append(command)
+            size += len(command) + 1
+        if batch and self.runtime(";".join(batch)).strip():
+            raise RuntimeError("HAProxy ACL insertion failed")
+        reply = self.runtime(f"commit acl @{version} {path}")
+        if reply.strip():
+            raise RuntimeError("HAProxy ACL commit failed")
+
     def apply_patterns(self, patterns: list[str]) -> None:
         self.preview(patterns)
         if not self.enabled:
             return
-        old = self.origins.read_text()
-        if atomic(self.origins, "\n".join(patterns) + "\n"):
-            try:
-                self.run(["haproxy", "-c", "-f", str(self.config_file)])
-                self.run(["systemctl", "reload", self.service])
-                self.current_sources = None
-            except Exception:
-                atomic(self.origins, old)
-                raise
+        content = "\n".join(patterns) + "\n"
+        if self.origins.read_text() != content:
+            self.replace_acl(self.origins, patterns)
+            atomic(self.origins, content)
 
     def apply_sources(self, expiries: dict[str, int]) -> None:
         if not self.enabled:
@@ -114,23 +142,24 @@ class HostAdapter:
                 columns = line.split()
                 if len(columns) >= 2 and columns[0].startswith("0x"):
                     self.current_sources.add(columns[1].removesuffix("/32"))
-        for ip in sorted(wanted - self.current_sources):
-            reply = self.runtime(f"add acl {self.sources} {ip}")
-            if reply.strip() and "already" not in reply:
-                raise RuntimeError("HAProxy ACL addition failed")
-        for ip in sorted(self.current_sources - wanted):
-            reply = self.runtime(f"del acl {self.sources} {ip}")
-            if reply.strip():
-                raise RuntimeError("HAProxy ACL removal failed")
-        self.current_sources = wanted
+        if wanted != self.current_sources:
+            self.replace_acl(self.sources, sorted(wanted))
+            self.current_sources = wanted
+        if self.current_expiries == expiries:
+            return
         now = int(time.time())
-        elements = ", ".join(
-            f"{ip} timeout {max(1, expiry - now)}s" for ip, expiry in sorted(expiries.items())
-        )
-        script = f"flush set inet {self.nft_table} activated_v4\n"
-        if elements:
-            script += f"add element inet {self.nft_table} activated_v4 {{ {elements} }}\n"
+        script = ""
+        for family in (4, 6):
+            elements = ", ".join(
+                f"{ip} timeout {max(1, expiry - now)}s"
+                for ip, expiry in sorted(expiries.items())
+                if ipaddress.ip_address(ip).version == family
+            )
+            script += f"flush set inet {self.nft_table} activated_v{family}\n"
+            if elements:
+                script += f"add element inet {self.nft_table} activated_v{family} {{ {elements} }}\n"
         self.run(["nft", "-f", "-"], input=script)
+        self.current_expiries = dict(expiries)
 
 
 class AgentEngine:
@@ -146,6 +175,9 @@ class AgentEngine:
             db.execute(
                 "CREATE TABLE IF NOT EXISTS leases(account_id TEXT,ip TEXT,exit_id TEXT,expires INTEGER,PRIMARY KEY(account_id,ip,exit_id))"
             )
+        with self.lease_store.connect() as db:
+            if "key_version" not in {r[1] for r in db.execute("PRAGMA table_info(leases)")}:
+                db.execute("ALTER TABLE leases ADD COLUMN key_version INTEGER NOT NULL DEFAULT 0")
         self.lock = asyncio.Lock()
         self.last_tick = 0.0
         self.generation = -1
@@ -153,9 +185,21 @@ class AgentEngine:
         self.last_error: str | None = None
         self.exit_health: dict[str, dict[str, Any]] = {}
         self.http = httpx.AsyncClient(timeout=8)
+        self.route_ready = settings.forward_mode == "local"
+        self.route_checked = 0.0
+        self.filter_checked = 0.0
+        self.route_error: str | None = None
+        self.probe = httpx.AsyncClient(
+            timeout=3, transport=httpx.AsyncHTTPTransport(local_address=settings.forward_source_ipv4 or None)
+        )
 
     def ready(self) -> bool:
-        return self.last_tick > 0 and time.monotonic() - self.last_tick <= 12 and self.last_error is None
+        return (
+            self.last_tick > 0
+            and time.monotonic() - self.last_tick <= 12
+            and self.last_error is None
+            and self.route_ready
+        )
 
     def snapshot(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
         with self.db.connect(readonly=True) as db:
@@ -238,13 +282,39 @@ class AgentEngine:
                 "SELECT ip,MAX(expires) FROM leases WHERE exit_id=? GROUP BY ip",
                 (self.settings.local_exit_id,),
             ).fetchall()
+        versions = {u["id"]: u["version"] for u in users}
+        with self.lease_store.connect() as db:
+            for row in db.execute("SELECT DISTINCT account_id,key_version FROM leases").fetchall():
+                if versions.get(row[0]) != row[1]:
+                    db.execute("DELETE FROM leases WHERE account_id=? AND key_version=?", tuple(row))
+            rows = db.execute(
+                "SELECT ip,MAX(expires) FROM leases WHERE exit_id=? GROUP BY ip",
+                (self.settings.local_exit_id,),
+            ).fetchall()
         expiries = {ip: expiry for ip, expiry in rows}
         for net in legacy:
             ip = public_ipv4(net["ip"])
             expiries[ip] = max(expiries.get(ip, 0), net["expires"])
         return expiries
 
+    async def check_route(self) -> None:
+        if self.settings.forward_mode == "local" or time.monotonic() - self.route_checked < 30:
+            return
+        try:
+            response = await self.probe.get("https://api.ipify.org")
+            response.raise_for_status()
+            self.route_ready = response.text.strip() == self.settings.expected_egress_ipv4
+            self.route_error = None if self.route_ready else "unexpected_egress"
+        except httpx.HTTPError:
+            self.route_ready, self.route_error = False, "egress_unreachable"
+        self.route_checked = time.monotonic()
+
     async def _reconcile(self) -> None:
+        await self.check_route()
+        if self.adapter.enabled and time.monotonic() - self.filter_checked >= 15:
+            health = await self.http.get(self.settings.agh_control_url + "/control/status", timeout=2)
+            health.raise_for_status()
+            self.filter_checked = time.monotonic()
         generation = self.db.generation()
         users, exceptions, legacy = self.snapshot()
         if generation != self.generation:
@@ -271,15 +341,20 @@ class AgentEngine:
                 self.last_error = type(e).__name__
                 raise
 
-    async def grant(self, account_id: str, ip: str, exit_id: str, generation: int) -> bool:
+    async def grant(
+        self, account_id: str, ip: str, exit_id: str, generation: int, credential_version: int | None = None
+    ) -> bool:
         if not ACCOUNT_RE.fullmatch(account_id) or not EXIT_RE.fullmatch(exit_id):
             return False
-        ip = public_ipv4(ip)
+        ip = public_ip(ip)
         async with self.lock:
             if self.generation != generation or not self.ready():
                 await self._reconcile()
             with self.db.connect(readonly=True) as db:
-                user = db.execute("SELECT status FROM accounts WHERE id=?", (account_id,)).fetchone()
+                user = db.execute(
+                    "SELECT a.status,c.version FROM accounts a JOIN credentials c ON c.account_id=a.id WHERE a.id=?",
+                    (account_id,),
+                ).fetchone()
                 exit_row = db.execute(
                     "SELECT * FROM exits WHERE id=? AND enabled=1 AND healthy=1", (exit_id,)
                 ).fetchone()
@@ -287,14 +362,34 @@ class AgentEngine:
                 not user
                 or user["status"] != "active"
                 or not exit_row
+                or not self.route_ready
                 or exit_id != self.settings.local_exit_id
             ):
                 return False
+            if credential_version is not None:
+                if credential_version == 0:
+                    with self.db.connect(readonly=True) as db:
+                        allowed = db.execute(
+                            "SELECT 1 FROM legacy_networks n WHERE n.account_id=? AND n.ip=? AND n.expires>? AND EXISTS(SELECT 1 FROM legacy_access l WHERE l.account_id=n.account_id AND l.expires>?)",
+                            (account_id, ip, int(time.time()), int(time.time())),
+                        ).fetchone()
+                    if not allowed:
+                        return False
+                elif credential_version != user["version"]:
+                    return False
             now = int(time.time())
             with self.lease_store.connect() as db:
+                count = db.execute(
+                    "SELECT COUNT(*) FROM leases WHERE account_id=? AND expires>?", (account_id, now)
+                ).fetchone()[0]
+                known = db.execute(
+                    "SELECT 1 FROM leases WHERE account_id=? AND ip=?", (account_id, ip)
+                ).fetchone()
+                if count >= 128 and not known:
+                    return False
                 db.execute(
-                    "INSERT INTO leases VALUES(?,?,?,?) ON CONFLICT(account_id,ip,exit_id) DO UPDATE SET expires=excluded.expires",
-                    (account_id, ip, exit_id, now + self.settings.lease_seconds),
+                    "INSERT INTO leases(account_id,ip,exit_id,expires,key_version) VALUES(?,?,?,?,?) ON CONFLICT(account_id,ip,exit_id) DO UPDATE SET expires=excluded.expires,key_version=excluded.key_version",
+                    (account_id, ip, exit_id, now + self.settings.lease_seconds, user["version"]),
                 )
             users, _, legacy = self.snapshot()
             await asyncio.to_thread(self.adapter.apply_sources, self.source_expiries(users, legacy))
@@ -319,6 +414,7 @@ class Grant(BaseModel):
     ip: str = Field(max_length=45)
     exit_id: str = Field(pattern=r"^[a-z][a-z0-9-]{0,31}$")
     generation: int = Field(ge=1)
+    credential_version: int = Field(ge=0)
 
 
 class Preview(BaseModel):
@@ -336,6 +432,7 @@ def create_agent(engine: AgentEngine) -> FastAPI:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
             await engine.http.aclose()
+            await engine.probe.aclose()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -345,13 +442,42 @@ def create_agent(engine: AgentEngine) -> FastAPI:
 
     @app.get("/status")
     async def status() -> dict[str, Any]:
+        traffic: dict[str, Any] = {}
+        if engine.adapter.enabled:
+            try:
+                raw = await asyncio.to_thread(engine.adapter.runtime, "show stat")
+                for row in csv.DictReader(io.StringIO(raw.removeprefix("# "))):
+                    if row.get("pxname") == "smartdns_origins" and row.get("svname") == "BACKEND":
+                        traffic = {
+                            name: int(row.get(column) or 0)
+                            for name, column in [
+                                ("received_bytes", "bin"),
+                                ("sent_bytes", "bout"),
+                                ("connections", "scur"),
+                                ("total_connections", "stot"),
+                            ]
+                        }
+                        break
+            except OSError, ValueError:
+                traffic = {}
+        with engine.lease_store.connect(readonly=True) as c:
+            leases = [
+                dict(r)
+                for r in c.execute(
+                    "SELECT account_id,ip,expires,key_version FROM leases WHERE expires>? LIMIT 2000",
+                    (int(time.time()),),
+                )
+            ]
         return {
+            "leases": leases,
+            "traffic": traffic,
             "ready": engine.ready(),
             "exits": {
                 key: value
                 | {"ready": value.get("ready") is True and time.monotonic() - value.get("checked_at", 0) < 10}
                 for key, value in engine.exit_health.items()
             },
+            "route": {"ready": engine.route_ready, "error": engine.route_error},
             "generation": engine.generation,
             "error": engine.last_error,
             "heartbeat_age": round(time.monotonic() - engine.last_tick, 1) if engine.last_tick else None,
@@ -360,7 +486,9 @@ def create_agent(engine: AgentEngine) -> FastAPI:
     @app.post("/grant")
     async def grant(body: Grant) -> dict[str, Any]:
         try:
-            ready = await engine.grant(body.account_id, body.ip, body.exit_id, body.generation)
+            ready = await engine.grant(
+                body.account_id, body.ip, body.exit_id, body.generation, body.credential_version
+            )
         except (ValueError, OSError, httpx.HTTPError, subprocess.SubprocessError) as e:
             raise HTTPException(503, "Agent operation failed") from e
         if not ready:

@@ -15,12 +15,18 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 UMask=0007
 ReadWritePaths=/var/lib/smartdns
 RuntimeDirectory=smartdns
 RuntimeDirectoryMode=0750
 Environment=SMARTDNS_MANAGE_HOST=1
 ReadWritePaths=/var/lib/smartdns-agent /etc/haproxy /run/haproxy /run/smartdns
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_DAC_OVERRIDE CAP_FOWNER
+CapabilityBoundingSet=CAP_NET_ADMIN
 [Install]
 WantedBy=multi-user.target

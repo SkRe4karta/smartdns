@@ -1,0 +1,13 @@
+# Changelog
+
+## 1.0.0
+
+- Light/dark violet administrator dashboard, generated product icon and responsive diagnostics.
+- Global statistics, per-user IP summaries, query transport/key version, DNS error reasons and bounded event pagination.
+- Optional TOTP, replay protection and one-use recovery codes.
+- IPv6 authenticated ingress and address-family-aware forwarding admission.
+- Transactional HAProxy ACL changes, bounded DoT pipelining, tunnel exit checks and fast QUIC fallback.
+- Ubuntu LTS installation, isolated filtering, certificate timers, atomic certificate-pair deployment and gateway reload.
+- Public deployment documentation and verified, commit-specific release artifacts.
+
+Historical alpha, beta and release-candidate tags remain archival source snapshots. See each release's own validation status before reuse.

@@ -19,11 +19,19 @@ class AgentClient:
             timeout=8,
         )
 
-    async def grant(self, account_id: str, ip: str, exit_id: str, generation: int) -> bool:
+    async def grant(
+        self, account_id: str, ip: str, exit_id: str, generation: int, credential_version: int = 0
+    ) -> bool:
         try:
             response = await self.client.post(
                 "/grant",
-                json={"account_id": account_id, "ip": ip, "exit_id": exit_id, "generation": generation},
+                json={
+                    "account_id": account_id,
+                    "ip": ip,
+                    "exit_id": exit_id,
+                    "generation": generation,
+                    "credential_version": credential_version,
+                },
             )
             return response.status_code == 200 and response.json().get("ready") is True
         except httpx.HTTPError, ValueError:

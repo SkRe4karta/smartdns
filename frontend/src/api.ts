@@ -44,6 +44,7 @@ export type User = {
   filtering: boolean;
   last_dns: number | null;
   has_password: boolean;
+  totp_enabled: boolean;
   version: string;
   agent: { ready: boolean; error?: string };
 };

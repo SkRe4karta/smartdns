@@ -3,22 +3,25 @@ import json
 import os
 import plistlib
 import sqlite3
+import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import __version__
+from . import __version__, diagnostics
 from .accounts import Accounts
 from .agent_client import AgentClient
 from .catalog import Catalog, CatalogImporter
 from .config import Settings
 from .db import Database
+from .mfa import MFA
 from .security import digest, equal, normalize_domain
 
 
@@ -47,6 +50,12 @@ class ExceptionRule(Body):
 class Password(Body):
     current: str | None = Field(default=None, max_length=256)
     new: str = Field(min_length=12, max_length=256)
+
+
+class Factor(Body):
+    code: str = Field(default="", max_length=32)
+    password: str = Field(default="", max_length=256)
+    challenge: str = Field(default="", max_length=100)
 
 
 class Override(Body):
@@ -78,7 +87,9 @@ def apple_profile(connection: dict[str, Any], identifier: str) -> bytes:
                     "DNSSettings": {
                         "DNSProtocol": "HTTPS",
                         "ServerURL": connection["doh"],
-                        "ServerAddresses": [connection["bootstrap"]],
+                        "ServerAddresses": [
+                            v for v in (connection["bootstrap"], connection.get("bootstrap_ipv6")) if v
+                        ],
                     },
                 }
             ],
@@ -91,6 +102,7 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
     settings = settings or Settings.load()
     db = Database(settings.db_path)
     accounts = Accounts(settings, db)
+    mfa = MFA(accounts)
     catalog = Catalog(db, settings.domain, settings.reserved_sni)
     control = agent or AgentClient(settings)
     refresh_lock = asyncio.Lock()
@@ -120,6 +132,13 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             if request.headers.get("origin") not in (None, settings.public_url):
                 return JSONResponse({"detail": "Недопустимый источник запроса"}, status_code=403)
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            chunks = bytearray()
+            async for chunk in request.stream():
+                chunks.extend(chunk)
+                if len(chunks) > 65536:
+                    return JSONResponse({"detail": "Запрос слишком большой"}, status_code=413)
+            request._body = bytes(chunks)
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -180,8 +199,10 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
             raise HTTPException(429, "Слишком много попыток. Попробуй позже")
 
     @app.get("/api/v1/health")
-    async def health() -> dict[str, Any]:
-        return {"version": __version__, "ready": True}
+    async def health() -> Response:
+        state = await control.status()
+        ready = state.get("ready") is True
+        return JSONResponse({"version": __version__, "ready": ready}, status_code=200 if ready else 503)
 
     @app.post("/api/v1/auth/login")
     async def login(body: Login, request: Request, response: Response) -> dict[str, Any]:
@@ -191,7 +212,39 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
         session = await asyncio.to_thread(accounts.login, body.login, body.password)
         if not session:
             raise HTTPException(401, "Неверный логин или пароль")
+        if isinstance(session, dict):
+            return {"mfa_required": True, **session}
         cookie(response, session)
+        return {"ok": True}
+
+    @app.post("/api/v1/auth/totp/verify")
+    async def factor_login(body: Factor, request: Request, response: Response) -> dict[str, Any]:
+        rate(request, "totp", 30, 300)
+        if db.limited("totp-challenge:" + digest(body.challenge), 5, 300):
+            raise HTTPException(429, "Слишком много попыток")
+        session = await asyncio.to_thread(mfa.complete, body.challenge, body.code)
+        if not session:
+            raise HTTPException(401, "Код недействителен или уже использован")
+        cookie(response, session)
+        return {"ok": True}
+
+    @app.post("/api/v1/auth/totp/setup")
+    async def factor_setup(body: Factor, request: Request, user: Admin) -> dict[str, str]:
+        rate(request, "totp-settings", 10, 300)
+        return await asyncio.to_thread(mfa.setup, user["id"], body.password)
+
+    @app.post("/api/v1/auth/totp/enable")
+    async def factor_enable(body: Factor, request: Request, user: Admin) -> dict[str, Any]:
+        rate(request, "totp-settings", 10, 300)
+        codes = await asyncio.to_thread(mfa.enable, user["id"], body.code, user["session_hash"])
+        db.audit(user["id"], "totp.enabled", user["id"])
+        return {"recovery_codes": codes}
+
+    @app.post("/api/v1/auth/totp/disable")
+    async def factor_disable(body: Factor, request: Request, user: Admin) -> dict[str, bool]:
+        rate(request, "totp-settings", 10, 300)
+        await asyncio.to_thread(mfa.disable, user["id"], body.password, body.code)
+        db.audit(user["id"], "totp.disabled", user["id"])
         return {"ok": True}
 
     @app.post("/api/v1/auth/logout")
@@ -227,6 +280,7 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
             "last_dns": user["last_dns"],
             "csrf": user["csrf"],
             "has_password": bool(user["password_hash"]),
+            "totp_enabled": mfa.enabled(user["id"]),
             "agent": await control.status(),
             "version": __version__,
         }
@@ -240,6 +294,79 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
     @app.get("/api/v1/catalog")
     def services(user: User) -> dict[str, Any]:
         return {"services": catalog.services()}
+
+    @app.get("/api/v1/admin/overview")
+    def global_overview(user: Admin, days: int = 1) -> dict[str, Any]:
+        if days not in (1, 7):
+            raise HTTPException(400, "Период должен составлять один или семь дней")
+        return diagnostics.overview(db, days)
+
+    @app.get("/api/v1/admin/dns-events")
+    def dns_events(
+        user: Admin,
+        account_id: str | None = None,
+        ip: str | None = None,
+        result: Literal["error", "blocked", "allowed", "proxied", "nxdomain", "refused"] | None = None,
+        transport: Literal["dot", "doh", "plain"] | None = None,
+        rcode: str | None = None,
+        since: int | None = None,
+        until: int | None = None,
+        cursor: int | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        if (
+            not 1 <= limit <= 100
+            or (rcode is not None and len(rcode) > 16)
+            or (account_id is not None and len(account_id) > 32)
+        ):
+            raise HTTPException(400, "Некорректные параметры журнала")
+        return diagnostics.events(
+            db,
+            account_id=account_id,
+            ip=ip,
+            result=result,
+            transport=transport,
+            rcode=rcode,
+            since=since,
+            until=until,
+            cursor=cursor,
+            limit=limit,
+        )
+
+    @app.get("/api/v1/admin/users/{account_id}/networks")
+    async def user_networks(account_id: str, user: Admin, days: int = 7) -> dict[str, Any]:
+        if days not in (1, 7):
+            raise HTTPException(400, "Период должен составлять один или семь дней")
+        target(account_id)
+        state = await control.status()
+        return {
+            "networks": diagnostics.networks(db, account_id, days),
+            "leases": [r for r in state.get("leases", []) if r["account_id"] == account_id],
+        }
+
+    @app.get("/api/v1/admin/diagnostics")
+    async def diagnostic_status(user: Admin) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=2) as client:
+            try:
+                response = await client.get(f"http://127.0.0.1:{settings.gateway_port}/health")
+                response.raise_for_status()
+                gateway = response.json()
+            except httpx.HTTPError, ValueError:
+                gateway = {"ready": False}
+        certificate: dict[str, Any] = {"last_success": None, "last_error": None}
+        try:
+            certificate.update(json.loads(settings.certificate_status_file.read_text()))
+        except OSError, ValueError:
+            pass
+        return {
+            "gateway": gateway,
+            "agent": await control.status(),
+            "certificate": certificate,
+            "retention": {"events_hours": 24, "networks_days": 7},
+            "forward_mode": settings.forward_mode,
+            "ipv6_enabled": bool(settings.public_ipv6),
+            "checked_at": int(time.time()),
+        }
 
     @app.get("/api/v1/admin/users")
     def users(user: Admin) -> dict[str, Any]:
@@ -283,6 +410,10 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
         if days not in (1, 7):
             raise HTTPException(400, "Период должен составлять один или семь дней")
         data = target(account_id)
+        with db.connect(readonly=True) as c:
+            data["key_version"] = c.execute(
+                "SELECT version FROM credentials WHERE account_id=?", (account_id,)
+            ).fetchone()[0]
         with db.connect(readonly=True) as connection:
             data["exceptions"] = [
                 dict(r)
@@ -507,6 +638,8 @@ def main() -> None:
         access_log=False,
         log_level="warning",
         proxy_headers=False,
+        limit_concurrency=128,
+        timeout_keep_alive=10,
     )
 
 
