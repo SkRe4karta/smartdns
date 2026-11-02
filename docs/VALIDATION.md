@@ -1,6 +1,8 @@
 # Validation
 
-The release report records the exact tested commit, artifact checksum and installed manifest. Required CI: backend, frontend, integration, security, release-check. First-install checks cover isolated Ubuntu 24.04/26.04 environments; synthetic certificates/configuration and a local DNS authority are used where public issuance cannot be exercised in CI. Live certificate renewal and real client applications are checked separately on the deployment.
+The release report records the exact tested commit, artifact checksum and installed manifest. Required CI: backend, frontend, integration, security, release-check. The `release-check` job installs the verified wheel and hash-locked dependencies in a fresh Python environment on the Ubuntu 24.04 CI runner, then checks migration, key preservation and SQLite backup/restore. It does not boot a complete VPS or certify systemd, Docker and ACME behavior on both Ubuntu versions.
+
+Full nested Docker/systemd installation jobs were retired because they coupled application acceptance to privileged container behavior. Live service startup, real DNS forwarding, certificate renewal and client acceptance are separate deployment gates. Ubuntu 24.04/26.04 remain installation targets; each release report must identify which platform was actually exercised. A green application installation check does not replace live deployment acceptance.
 
 Validation has two focused intermediate batches and one final batch. Network runs are bounded to two-minute cycles; no long production load campaign is required. Repeat only affected scenarios after fixes, then run required final CI.
 

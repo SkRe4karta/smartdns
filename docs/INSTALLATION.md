@@ -1,6 +1,6 @@
 # Installation
 
-Automated platforms: Ubuntu 24.04/26.04 LTS x86_64. Budget at least 1 GiB RAM and 2 GiB free disk. Use a validated release artifact, published SHA256 and exact manifest commit. Node is needed only for source builds. A public IPv4 is required; IPv6 is optional.
+Installer targets: Ubuntu 24.04/26.04 LTS x86_64. CI checks application installation and migration in a fresh environment; full host-service compatibility is recorded separately in the release acceptance report. Budget at least 1 GiB RAM and 2 GiB free disk. Use a validated release artifact, published SHA256 and exact manifest commit. Node is needed only for source builds. A public IPv4 is required; IPv6 is optional.
 
 ## Dedicated host
 
