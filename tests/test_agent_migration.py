@@ -55,6 +55,7 @@ async def test_agent_rotation_and_watchdog_are_fail_closed(stack, tmp_path):
     stack["accounts"].rotate(stack["owner"]["id"])
     await engine.reconcile()
     assert not adapter.sources
+    assert not await engine.grant(stack["owner"]["id"], "8.8.8.8", "primary", stack["db"].generation(), 1)
     engine.last_tick = time.monotonic() - 20
     assert not engine.ready()
     adapter.fail = True

@@ -983,7 +983,7 @@ wheels = [
 
 [[package]]
 name = "smartdns-dns"
-version = "0.3.0rc1"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "argon2-cffi" },

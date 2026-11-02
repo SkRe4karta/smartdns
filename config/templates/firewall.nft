@@ -1,4 +1,11 @@
-# Merge into persistent nftables configuration. Never flush an existing ruleset.
+# Installation-owned table only. Preserve the host's other firewall tables.
+# Replace the documentation addresses; omit IPv6 rules when no public IPv6 is configured.
 table inet smartdns {
  set activated_v4 { type ipv4_addr; flags timeout; }
+ set activated_v6 { type ipv6_addr; flags timeout; }
+ chain quic_fallback {
+  type filter hook input priority -10; policy accept;
+  ip daddr 203.0.113.10 udp dport 443 reject with icmp type port-unreachable
+  ip6 daddr 2001:db8::10 udp dport 443 reject with icmpv6 type port-unreachable
+ }
 }

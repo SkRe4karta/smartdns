@@ -1,9 +1,9 @@
 # Release process
 
-Use main for published versions, develop for integration and feature/fix branches for pull requests. Pin GitHub Actions by SHA, use minimal permissions and retain branch protection. Never publish an artifact built from a dirty working tree as a release.
+`main` contains published versions; `develop` integrates changes; feature/fix branches use PRs. Release stabilization uses `release/1.0.0`. Protected branches require green backend/frontend/integration/security/release-check jobs, forbid force-push/deletion and apply to administrators. No second-account approval is required.
 
-For 0.3.0-rc.1 schedule two small intermediate verification batches and one final batch. Required failures block release. Record which application/device scenarios were actually checked; do not replace missing client verification with server-only checks.
+Review migrations, authorization, privileged operations, production dependency advisories and sanitized assets. Fix blocking findings before merge. Record the reviewer and actual checks without implying independent human approval.
 
-Build a commit-specific archive and SHA256SUMS; include the source SHA and file hashes in a manifest. Deploy that artifact, then compare its SHA/version to the installed instance. Keep production configuration and credentials outside it.
+Build from a clean exact `main` commit. Produce the archive, SHA256SUMS, dependency inventory and provenance. Verify clean installation/update/restore; deploy that artifact, compare installed SHA/version/hash, and complete live acceptance before tagging `v1.0.0` and publishing.
 
-Historical tags are archival source snapshots. After privacy-driven history rewriting their old binary assets and hashes must not be presented as verified builds of the rewritten commits. Remove affected old assets and invalidate stale links.
+Release assets and public acceptance contain no private domains, IPs, SSH aliases, secrets or installation paths. Private operational details stay outside Git. Archival pre-1.0 source tags are not newly validated binaries. History rewriting cannot erase external downloads/caches.

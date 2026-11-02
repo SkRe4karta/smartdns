@@ -1,3 +1,8 @@
 title = "SmartDNS source secret scanning"
 [extend]
 useDefault = true
+
+[[rules]]
+id = "smartdns-credential"
+description = "Live SmartDNS credential"
+regex = '''\bk[a-z2-7]{52}\b'''

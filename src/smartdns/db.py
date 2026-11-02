@@ -80,7 +80,7 @@ class Database:
         with self.connect() as db:
             if db.execute("SELECT 1 FROM sqlite_master WHERE name='schema_migrations'").fetchone():
                 version = db.execute("SELECT COALESCE(MAX(version),0) FROM schema_migrations").fetchone()[0]
-                if version > 2:
+                if version > 3:
                     raise ValueError("Database is newer than this application; restore the matching release")
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(SCHEMA)
@@ -100,6 +100,38 @@ class Database:
                 db.execute("UPDATE accounts SET password_hash=NULL,telegram_sub=NULL WHERE role!='admin'")
                 db.execute("UPDATE accounts SET status='active' WHERE role='user' AND status='invited'")
                 db.execute("INSERT INTO schema_migrations VALUES(2,?)", (int(time.time()),))
+                self.bump(db)
+            if not db.execute("SELECT 1 FROM schema_migrations WHERE version=3").fetchone():
+                for column, kind in [
+                    ("client_ip", "TEXT"),
+                    ("transport", "TEXT"),
+                    ("key_version", "INTEGER"),
+                    ("rcode", "TEXT"),
+                    ("reason", "TEXT"),
+                ]:
+                    db.execute(f"ALTER TABLE dns_events ADD COLUMN {column} {kind}")
+                statements = """
+                CREATE INDEX IF NOT EXISTS dns_events_result_time ON dns_events(result,at,id);
+                CREATE INDEX IF NOT EXISTS dns_events_ip_time ON dns_events(client_ip,at,id);
+                CREATE TABLE IF NOT EXISTS network_buckets(
+                  account_id TEXT NOT NULL,ip TEXT NOT NULL,bucket INTEGER NOT NULL,
+                  first_seen INTEGER NOT NULL,last_seen INTEGER NOT NULL,
+                  total INTEGER NOT NULL,errors INTEGER NOT NULL,
+                  PRIMARY KEY(account_id,ip,bucket));
+                CREATE TABLE IF NOT EXISTS totp(
+                  account_id TEXT PRIMARY KEY REFERENCES accounts(id),secret TEXT NOT NULL,
+                  enabled INTEGER NOT NULL DEFAULT 0,last_step INTEGER NOT NULL DEFAULT -1);
+                CREATE TABLE IF NOT EXISTS recovery_codes(
+                  account_id TEXT NOT NULL REFERENCES accounts(id),code_hash TEXT NOT NULL,
+                  PRIMARY KEY(account_id,code_hash));
+                CREATE TABLE IF NOT EXISTS login_challenges(
+                  token_hash TEXT PRIMARY KEY,account_id TEXT NOT NULL REFERENCES accounts(id),
+                  expires INTEGER NOT NULL);
+                """
+                for statement in statements.split(";"):
+                    if statement.strip():
+                        db.execute(statement)
+                db.execute("INSERT INTO schema_migrations VALUES(3,?)", (int(time.time()),))
                 self.bump(db)
 
     @contextlib.contextmanager

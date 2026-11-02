@@ -1,6 +1,7 @@
 """Isolated browser-test server. Never uses production paths or credentials."""
 
 import tempfile
+import time
 from pathlib import Path
 
 import uvicorn
@@ -57,6 +58,23 @@ def main():
             connection.execute(
                 "INSERT INTO exits(id,name,ingress_ip,egress_ip,country) VALUES('primary','Local','203.0.113.10','203.0.113.10','FI')"
             )
+        # Synthetic activity for UI/chart acceptance and public documentation screenshots.
+        now = int(time.time()) // 300 * 300
+        with db.connect() as connection:
+            for i in range(96):
+                volume = 60 + (i * 29) % 180 + i * 2
+                connection.execute(
+                    "INSERT INTO dns_buckets VALUES(?,?,?,?,?,?)",
+                    (
+                        owner["id"],
+                        now - (95 - i) * 300,
+                        volume,
+                        volume // 5,
+                        volume // 3,
+                        1 if i % 23 == 0 else 0,
+                    ),
+                )
+            connection.execute("UPDATE accounts SET last_dns=? WHERE id=?", (now, owner["id"]))
         uvicorn.run(create_app(settings, agent=TestAgent()), host="127.0.0.1", port=3018, access_log=False)
 
 

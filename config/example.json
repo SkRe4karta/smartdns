@@ -3,7 +3,10 @@
   "public_ipv4": "203.0.113.10",
   "data_dir": "/var/lib/smartdns",
   "master_key_file": "/etc/smartdns/master.key",
-  "cert_file": "/etc/smartdns/certs/fullchain.pem",
-  "key_file": "/etc/smartdns/certs/privkey.pem",
-  "frontend_dir": "/opt/smartdns/current/frontend/dist"
+  "cert_file": "/etc/smartdns/certs/current/fullchain.pem",
+  "key_file": "/etc/smartdns/certs/current/privkey.pem",
+  "frontend_dir": "/opt/smartdns/current/frontend/dist",
+  "public_ipv6": "",
+  "forward_mode": "local",
+  "fast_quic_fallback": true
 }

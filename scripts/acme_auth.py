@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Certbot DNS-01 hook; secrets are read from a root-only credentials file."""
 
+import http.client
+import ipaddress
 import json
 import os
 import subprocess
@@ -12,8 +14,10 @@ credentials = json.loads(
     Path(os.environ.get("ACME_DNS_CREDENTIALS", "/etc/smartdns/acme-dns.json")).read_text()
 )
 validation = os.environ["CERTBOT_VALIDATION"]
-request = urllib.request.Request(
-    "https://auth.acme-dns.io/update",
+if not credentials.get("api_url", "https://auth.acme-dns.io").startswith("https://"):
+    raise ValueError("ACME DNS API must use HTTPS")
+request = urllib.request.Request(  # noqa: S310 -- root-owned configuration, HTTPS validated above
+    credentials.get("api_url", "https://auth.acme-dns.io").rstrip("/") + "/update",
     data=json.dumps({"subdomain": credentials["subdomain"], "txt": validation}).encode(),
     headers={
         "Content-Type": "application/json",
@@ -21,7 +25,19 @@ request = urllib.request.Request(
         "X-Api-Key": credentials["password"],
     },
 )
-with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310 -- fixed HTTPS ACME service
+
+
+class SourceHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        source = str(ipaddress.ip_address(credentials["source_address"]))
+        return self.do_open(
+            lambda host, **kwargs: http.client.HTTPSConnection(host, source_address=(source, 0), **kwargs),
+            req,
+        )
+
+
+opener = urllib.request.build_opener(*([SourceHTTPSHandler()] if credentials.get("source_address") else []))
+with opener.open(request, timeout=30) as response:  # noqa: S310 -- fixed HTTPS ACME service
     if response.status != 200:
         raise RuntimeError("ACME DNS update failed")
 for _ in range(60):

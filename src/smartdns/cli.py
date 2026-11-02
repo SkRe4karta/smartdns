@@ -43,6 +43,8 @@ def main() -> None:
     cmd.add_argument("--output")
     cmd = sub.add_parser("admin-password")
     cmd.add_argument("login")
+    cmd = sub.add_parser("reset-totp")
+    cmd.add_argument("login")
     sub.add_parser("list")
     cmd = sub.add_parser("catalog-refresh")
     cmd.add_argument("--bootstrap", action="store_true")
@@ -72,7 +74,11 @@ def main() -> None:
         with database.connect() as db:
             db.execute(
                 "INSERT INTO exits(id,name,ingress_ip,egress_ip,country) VALUES(?,'Local',?,?,'XX') ON CONFLICT(id) DO UPDATE SET ingress_ip=excluded.ingress_ip,egress_ip=excluded.egress_ip,enabled=1,healthy=1,control_url=NULL",
-                (settings.local_exit_id, settings.public_ipv4, settings.public_ipv4),
+                (
+                    settings.local_exit_id,
+                    settings.public_ipv4,
+                    settings.expected_egress_ipv4 or settings.public_ipv4,
+                ),
             )
             db.execute("UPDATE exits SET enabled=0 WHERE id!=?", (settings.local_exit_id,))
             database.bump(db)
@@ -101,7 +107,26 @@ def main() -> None:
                 raise ValueError("Administrator not found")
             db.execute("UPDATE accounts SET password_hash=? WHERE id=?", (encoded, row[0]))
             db.execute("DELETE FROM sessions WHERE account_id=?", (row[0],))
+            db.execute("DELETE FROM login_challenges WHERE account_id=?", (row[0],))
         print("Administrator password changed; sessions revoked")
+    elif args.command == "reset-totp":
+        if os.geteuid() != 0:
+            raise ValueError("TOTP recovery requires root")
+        with database.connect() as db:
+            row = db.execute(
+                "SELECT id FROM accounts WHERE login=? AND role='admin'", (args.login,)
+            ).fetchone()
+            if not row:
+                raise ValueError("Administrator not found")
+            for statement in (
+                "DELETE FROM totp WHERE account_id=?",
+                "DELETE FROM recovery_codes WHERE account_id=?",
+                "DELETE FROM login_challenges WHERE account_id=?",
+                "DELETE FROM sessions WHERE account_id=?",
+            ):
+                db.execute(statement, (row[0],))
+        database.audit("cli", "totp.reset", row[0])
+        print("TOTP reset; administrator sessions revoked. DNS credentials retained.")
     elif args.command == "migrate-alpha":
         print(json.dumps(accounts.migrate_alpha(args.database), ensure_ascii=False, indent=2))
     elif args.command == "list":

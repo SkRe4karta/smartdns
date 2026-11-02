@@ -9,7 +9,6 @@ import {
   Clipboard,
   Globe2,
   LayoutDashboard,
-  Leaf,
   Loader2,
   LockKeyhole,
   LogOut,
@@ -20,16 +19,23 @@ import {
   Server,
   Settings2,
   ShieldCheck,
-  ShieldOff,
   Users,
   Wifi,
   X,
 } from "lucide-react";
 import { api, APIError, setCSRF, number, date, type User } from "./api";
 import "./style.css";
+import {
+  GlobalOverview,
+  DNSJournal,
+  NetworkHistory,
+  DiagnosticHealth,
+} from "./diagnostics";
+import { MFASettings, ThemeToggle } from "./mfa";
 
 type Notice = (message: string, error?: boolean) => void;
-type View = "overview" | "catalog" | "profile" | "users" | "system";
+type View =
+  "overview" | "catalog" | "profile" | "users" | "system" | "diagnostics";
 const nav: {
   id: View;
   label: string;
@@ -38,7 +44,8 @@ const nav: {
 }[] = [
   { id: "overview", label: "Обзор", icon: LayoutDashboard },
   { id: "users", label: "Пользователи", icon: Users },
-  { id: "catalog", label: "Каталог сервисов", icon: Globe2 },
+  { id: "diagnostics", label: "Диагностика", icon: Activity },
+  { id: "catalog", label: "Каталог и маршруты", icon: Globe2 },
   { id: "system", label: "Система", icon: Activity },
   { id: "profile", label: "Безопасность", icon: Settings2 },
 ];
@@ -47,10 +54,10 @@ function Brand() {
   return (
     <div className="brand">
       <span className="brand-mark">
-        <Leaf size={23} />
+        <img src="/icon.png" width="34" height="34" alt="" />
       </span>
       <div>
-        SmartDNS<span>PRIVATE DNS</span>
+        SmartDNS<span>CONTROL PANEL</span>
       </div>
     </div>
   );
@@ -138,8 +145,13 @@ function Auth({ onLogin, notice }: { onLogin: () => void; notice: Notice }) {
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [challenge, setChallenge] = useState("");
+  const [otp, setOTP] = useState("");
   return (
     <div className="auth-page">
+      <div className="auth-theme">
+        <ThemeToggle />
+      </div>
       <div className="auth-card">
         <Brand />
         <h1>Панель администратора</h1>
@@ -149,8 +161,17 @@ function Auth({ onLogin, notice }: { onLogin: () => void; notice: Notice }) {
             e.preventDefault();
             setBusy(true);
             try {
-              await api("/auth/login", "POST", { login, password });
+              const result = challenge
+                ? await api("/auth/totp/verify", "POST", {
+                    challenge,
+                    code: otp,
+                  })
+                : await api("/auth/login", "POST", { login, password });
               setPassword("");
+              if (result.mfa_required) {
+                setChallenge(result.challenge);
+                return;
+              }
               onLogin();
             } catch (e) {
               notice((e as Error).message, true);
@@ -159,263 +180,45 @@ function Auth({ onLogin, notice }: { onLogin: () => void; notice: Notice }) {
             }
           }}
         >
-          <Field label="Логин">
-            <input
-              autoComplete="username"
-              value={login}
-              onChange={(e) => setLogin(e.target.value)}
-              required
-            />
-          </Field>
-          <Field label="Пароль">
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </Field>
+          {!challenge && (
+            <>
+              <Field label="Логин">
+                <input
+                  autoComplete="username"
+                  value={login}
+                  onChange={(e) => setLogin(e.target.value)}
+                  required
+                />
+              </Field>
+              <Field label="Пароль">
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </Field>
+            </>
+          )}
+          {challenge && (
+            <Field label="Код TOTP или восстановления">
+              <input
+                autoFocus
+                autoComplete="one-time-code"
+                value={otp}
+                onChange={(e) => setOTP(e.target.value)}
+                maxLength={32}
+                required
+              />
+            </Field>
+          )}
           <button className="primary" disabled={busy}>
             Войти
           </button>
         </form>
       </div>
     </div>
-  );
-}
-
-function Overview({ notice, user }: { notice: Notice; user: User }) {
-  const [days, setDays] = useState(1);
-  const { data, loading } = useData("/me/stats?days=" + days, notice);
-  if (loading) return <Spinner />;
-  if (!data)
-    return <Empty>Не удалось загрузить данные. Обнови страницу.</Empty>;
-  const max = Math.max(1, ...data.buckets.map((b: any) => b.total));
-  const points = data.buckets
-    .map(
-      (b: any, i: number) =>
-        `${data.buckets.length === 1 ? 0 : (i / (data.buckets.length - 1)) * 800},${150 - (b.total / max) * 120}`,
-    )
-    .join(" ");
-  const metrics = [
-    {
-      label: "DNS-запросы",
-      value: data.totals.total,
-      icon: Activity,
-      hint: "На всех твоих устройствах",
-    },
-    {
-      label: "Заблокировано",
-      value: data.totals.blocked,
-      icon: ShieldCheck,
-      hint: "Реклама и нежелательные домены",
-    },
-    {
-      label: "Через прокси",
-      value: data.totals.proxied,
-      icon: Globe2,
-      hint: "Ответы с направлением через сервис",
-    },
-    {
-      label: "Ошибки DNS",
-      value: data.totals.errors,
-      icon: Wifi,
-      hint: "Нуждаются во внимании",
-    },
-  ];
-  return (
-    <>
-      <div className="welcome">
-        <div>
-          <p className="eyebrow">ТВОЙ ИНТЕРНЕТ ПОД КОНТРОЛЕМ</p>
-          <h2>
-            Привет, {user.name.split(" ")[0]} <span className="wave">↗</span>
-          </h2>
-          <p>Общая статистика твоего личного DNS.</p>
-        </div>
-        <Pill tone={user.agent.ready ? "green" : "amber"}>
-          {user.agent.ready ? "Сервис готов" : "Настройки применяются"}
-        </Pill>
-      </div>
-      <div className="metrics">
-        {metrics.map((m) => (
-          <article className="card metric" key={m.label}>
-            <div>
-              <span>{m.label}</span>
-              <m.icon size={18} />
-            </div>
-            <strong>{number(m.value)}</strong>
-            <small>{m.hint}</small>
-          </article>
-        ))}
-      </div>
-      <div className="dashboard-grid">
-        <article className="card chart">
-          <div className="card-head">
-            <div>
-              <h3>Активность запросов</h3>
-              <p>Обращения всех устройств с твоей DNS-настройкой</p>
-            </div>
-            <div className="segmented">
-              <button
-                className={days === 1 ? "selected" : ""}
-                onClick={() => setDays(1)}
-              >
-                24 часа
-              </button>
-              <button
-                className={days === 7 ? "selected" : ""}
-                onClick={() => setDays(7)}
-              >
-                7 дней
-              </button>
-            </div>
-          </div>
-          {data.buckets.length ? (
-            <>
-              <div className="chart-axis">
-                <span>{number(max)}</span>
-                <span>{number(Math.round(max / 2))}</span>
-                <span>0</span>
-              </div>
-              <svg
-                viewBox="0 0 800 180"
-                preserveAspectRatio="none"
-                role="img"
-                aria-label="График DNS-запросов"
-              >
-                <defs>
-                  <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#82e5a8" stopOpacity=".2" />
-                    <stop offset="100%" stopColor="#82e5a8" stopOpacity="0" />
-                  </linearGradient>
-                </defs>
-                {[30, 90, 150].map((y) => (
-                  <line
-                    key={y}
-                    x1="0"
-                    x2="800"
-                    y1={y}
-                    y2={y}
-                    stroke="#294336"
-                    strokeDasharray="4 5"
-                  />
-                ))}
-                <polygon points={`0,170 ${points} 800,170`} fill="url(#area)" />
-                <polyline
-                  points={points}
-                  fill="none"
-                  stroke="#86e7a4"
-                  strokeWidth="2.5"
-                  vectorEffect="non-scaling-stroke"
-                />
-              </svg>
-              <div className="chart-labels">
-                <span>{date(data.buckets[0].at)}</span>
-                <span>{date(data.buckets.at(-1).at)}</span>
-              </div>
-            </>
-          ) : (
-            <Empty>Подключи устройство — здесь появится график запросов.</Empty>
-          )}
-        </article>
-        <article className="card protection">
-          <div className="protection-symbol">
-            {user.filtering ? (
-              <ShieldCheck size={38} />
-            ) : (
-              <ShieldOff size={38} />
-            )}
-          </div>
-          <Pill tone={user.filtering ? "green" : "amber"}>
-            {user.filtering ? "Защита включена" : "Фильтрация выключена"}
-          </Pill>
-          <h3>
-            {user.filtering
-              ? "Меньше лишнего."
-              : "Настройки под твоим контролем."}
-          </h3>
-          <p>
-            AdGuard DNS Filter и HaGeZi Multi PRO. Обновление списков каждый
-            день.
-          </p>
-          <div className="status-line">
-            <span>Последнее обращение</span>
-            <b>{date(user.last_dns)}</b>
-          </div>
-          <small>DNS не удаляет всю встроенную рекламу YouTube.</small>
-        </article>
-      </div>
-      <div className="dashboard-grid">
-        <article className="card">
-          <div className="card-head">
-            <h3>Последние запросы</h3>
-            <span className="subtle">Хранятся 24 часа</span>
-          </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Домен</th>
-                  <th>Результат</th>
-                  <th>Время</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.recent.slice(0, 12).map((r: any, i: number) => (
-                  <tr key={i}>
-                    <td className="mono">{r.domain}</td>
-                    <td>
-                      <Pill
-                        tone={
-                          r.result === "blocked"
-                            ? "muted"
-                            : r.result === "error"
-                              ? "red"
-                              : "green"
-                        }
-                      >
-                        {
-                          {
-                            blocked: "Заблокирован",
-                            proxied: "Через сервис",
-                            allowed: "Разрешён",
-                            error: "Ошибка",
-                          }[r.result as string]
-                        }
-                      </Pill>
-                    </td>
-                    <td className="subtle">
-                      {new Date(r.at * 1000).toLocaleTimeString("ru-RU")}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {!data.recent.length && <Empty>Запросов пока нет.</Empty>}
-          </div>
-        </article>
-        <article className="card">
-          <div className="card-head">
-            <h3>Чаще блокируются</h3>
-            <ShieldCheck size={18} />
-          </div>
-          {data.top_blocked.map((r: any, i: number) => (
-            <div className="rank-row" key={r.domain}>
-              <span>{String(i + 1).padStart(2, "0")}</span>
-              <b>{r.domain}</b>
-              <em>{number(r.count)}</em>
-            </div>
-          ))}
-          {!data.top_blocked.length && (
-            <Empty>
-              Здесь появятся заблокированные рекламные и трекинговые домены.
-            </Empty>
-          )}
-        </article>
-      </div>
-    </>
   );
 }
 
@@ -462,19 +265,6 @@ function ConnectionCards({
           </div>
         </div>
       ))}
-      <div className="info-box">
-        <Wifi size={21} />
-        <div>
-          <b>Ubuntu и приложения на компьютере</b>
-          <p>
-            Отдельный ключ не нужен. Обычное поле «DNS» в настройках Ubuntu не
-            принимает URL DoH. Для системного DNS используйте systemd-resolved с
-            DoT: IP сервера и имя DoT выше для TLS/SNI. DNS, настроенный только
-            в браузере, не распространяется на Codex и другие приложения. Уже
-            работающее системное подключение менять не нужно.
-          </p>
-        </div>
-      </div>
       <div className="connection-block">
         <h4>iPhone и MacBook</h4>
         <p>
@@ -900,6 +690,11 @@ function Profile({
         <p>Вход в кабинет не влияет на работу личного DNS.</p>
       </div>
       <div className="dashboard-grid">
+        <MFASettings
+          enabled={user.totp_enabled}
+          notice={notice}
+          onChange={onChange}
+        />
         <section className="card">
           <h3>Пароль</h3>
           <form onSubmit={passwordSubmit}>
@@ -991,6 +786,7 @@ function UserCard({
     }
   }
   useEffect(() => {
+    const focused = document.activeElement as HTMLElement | null;
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const key = (e: KeyboardEvent) => {
@@ -999,6 +795,7 @@ function UserCard({
     document.addEventListener("keydown", key);
     return () => {
       document.body.style.overflow = previous;
+      focused?.focus();
       document.removeEventListener("keydown", key);
     };
   }, [onClose]);
@@ -1014,6 +811,23 @@ function UserCard({
         aria-modal="true"
         aria-label="Пользователь"
         className="user-dialog"
+        onKeyDown={(e) => {
+          if (e.key !== "Tab") return;
+          const nodes = Array.from(
+            e.currentTarget.querySelectorAll<HTMLElement>(
+              'button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),[tabindex="0"]',
+            ),
+          );
+          const first = nodes[0],
+            last = nodes.at(-1);
+          if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last?.focus();
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first?.focus();
+          }
+        }}
       >
         <button autoFocus className="secondary dialog-close" onClick={onClose}>
           <X size={18} /> Закрыть
@@ -1029,7 +843,10 @@ function UserCard({
               <Pill tone={data.user.status === "active" ? "green" : "amber"}>
                 {data.user.status === "active" ? "Активен" : "Отключён"}
               </Pill>
-              <p>Последний DNS-запрос: {date(data.user.last_dns)}</p>
+              <p>
+                Ключ v{data.user.key_version} · Последний DNS-запрос:{" "}
+                {date(data.user.last_dns)}
+              </p>
             </div>
             <div className="card">
               <div className="card-head">
@@ -1068,6 +885,8 @@ function UserCard({
                 ))}
               </div>
             </div>
+            <NetworkHistory id={id} notice={notice} revision={revision} />
+            <DNSJournal accountId={id} notice={notice} />
             <ConnectionCards id={id} notice={notice} revision={revision} />
             <Filtering accountId={id} notice={notice} onChange={onChange} />
             <section className="card danger-zone">
@@ -1364,7 +1183,7 @@ function App() {
   if (user) {
     switch (view) {
       case "overview":
-        content = <Overview user={user} notice={notice} />;
+        content = <GlobalOverview notice={notice} />;
         break;
 
       case "catalog":
@@ -1379,6 +1198,18 @@ function App() {
         content = <AdminUsers notice={notice} />;
         break;
 
+      case "diagnostics":
+        content = (
+          <>
+            <div className="section-title">
+              <h2>Диагностика</h2>
+              <p>Состояние обработки запросов и ошибки по DNS-профилям.</p>
+            </div>
+            <DiagnosticHealth notice={notice} />
+            <DNSJournal notice={notice} />
+          </>
+        );
+        break;
       case "system":
         content = <System notice={notice} />;
     }
@@ -1422,7 +1253,7 @@ function App() {
               </div>
               <div className="sidebar-version">
                 {user.version}
-                <span>RC</span>
+                <span>STABLE</span>
               </div>
               <button className="logout" onClick={logout}>
                 <LogOut size={17} /> Выйти
@@ -1449,6 +1280,7 @@ function App() {
                 Панель <ChevronRight size={14} />
                 <b>{title}</b>
               </div>
+              <ThemeToggle />
               <div className="user-info">
                 <span>
                   {user.name}
@@ -1487,4 +1319,13 @@ function App() {
   );
 }
 
+const preference = localStorage.getItem("smartdns-theme") || "system";
+const media = matchMedia("(prefers-color-scheme: dark)");
+const applySystem = () => {
+  if ((localStorage.getItem("smartdns-theme") || "system") === "system")
+    document.documentElement.dataset.theme = media.matches ? "dark" : "light";
+};
+document.documentElement.dataset.theme =
+  preference === "system" ? (media.matches ? "dark" : "light") : preference;
+media.addEventListener("change", applySystem);
 createRoot(document.getElementById("root")!).render(<App />);
