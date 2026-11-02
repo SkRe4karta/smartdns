@@ -2,6 +2,11 @@ http:
   address: 127.0.0.1:3010
   doh:
     insecure_enabled: true
+    routes:
+      - GET /dns-query
+      - POST /dns-query
+      - GET /dns-query/{ClientID}
+      - POST /dns-query/{ClientID}
 users: []
 dns:
   bind_hosts: [127.0.0.1]
@@ -13,7 +18,6 @@ dns:
   cache_size: 8388608
 tls:
   enabled: false
-  allow_unencrypted_doh: true
 querylog:
   enabled: false
 statistics:
