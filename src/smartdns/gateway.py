@@ -294,7 +294,7 @@ class Gateway:
         key = self.legacy_key(ip)
         if not key:
             return None
-        return await self.query(key, ip, wire, transport="plain")
+        return await self.query(key, ip, wire, record=False, transport="plain")
 
     async def plain_tcp(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:

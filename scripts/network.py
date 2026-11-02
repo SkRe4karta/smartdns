@@ -49,6 +49,17 @@ def main() -> None:
             rules.append(
                 f"add rule inet {table} smartdns_quic ip6 daddr {v6} udp dport 443 reject with icmpv6 type port-unreachable"
             )
+    if cfg.get("plain_dns_enabled"):
+        chain = "smartdns_plain"
+        if subprocess.run(["nft", "list", "chain", "inet", table, chain], capture_output=True).returncode:
+            rules.append(
+                f"add chain inet {table} {chain} {{ type filter hook input priority -10; policy accept; }}"
+            )
+        rules.append(f"flush chain inet {table} {chain}")
+        for protocol in ("tcp", "udp"):
+            rules.append(
+                f"add rule inet {table} {chain} ip daddr {v4} {protocol} dport 53 ip saddr != @activated_v4 drop"
+            )
     tunnel = cfg.get("forward_mode") == "tunnel"
     if tunnel:
         interface = cfg["forward_interface"]
