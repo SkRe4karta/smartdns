@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import ipaddress
 import logging
 import os
@@ -437,6 +439,24 @@ def create_agent(engine: AgentEngine) -> FastAPI:
 
     @app.get("/status")
     async def status() -> dict[str, Any]:
+        traffic: dict[str, Any] = {}
+        if engine.adapter.enabled:
+            try:
+                raw = await asyncio.to_thread(engine.adapter.runtime, "show stat")
+                for row in csv.DictReader(io.StringIO(raw.removeprefix("# "))):
+                    if row.get("pxname") == "smartdns_origins" and row.get("svname") == "BACKEND":
+                        traffic = {
+                            name: int(row.get(column) or 0)
+                            for name, column in [
+                                ("received_bytes", "bin"),
+                                ("sent_bytes", "bout"),
+                                ("connections", "scur"),
+                                ("total_connections", "stot"),
+                            ]
+                        }
+                        break
+            except OSError, ValueError:
+                traffic = {}
         with engine.lease_store.connect(readonly=True) as c:
             leases = [
                 dict(r)
@@ -447,6 +467,7 @@ def create_agent(engine: AgentEngine) -> FastAPI:
             ]
         return {
             "leases": leases,
+            "traffic": traffic,
             "ready": engine.ready(),
             "exits": {
                 key: value

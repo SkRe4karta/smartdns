@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -33,7 +34,7 @@ def main() -> None:
         raise SystemExit("Commit all source changes before producing a release artifact")
     epoch = int(run(["git", "show", "-s", "--format=%ct", "HEAD"]))
     version = root.joinpath("VERSION").read_text().strip()
-    if version != "1.0.0":
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?", version):
         raise SystemExit("Unexpected release version")
     if not root.joinpath("frontend/dist/index.html").is_file():
         raise SystemExit("Build the frontend first")
@@ -69,7 +70,6 @@ def main() -> None:
         if len(wheels) != 1:
             raise RuntimeError("Expected exactly one application wheel")
         files["wheels/" + wheels[0].name] = (wheels[0].read_bytes(), 0o644)
-    import re
 
     lock = json.loads(root.joinpath("frontend/package-lock.json").read_text())
     components = [

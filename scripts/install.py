@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -83,6 +84,10 @@ def main() -> None:
     restore = command.add_parser("rollback")
     restore.add_argument("backup", type=Path)
     args = parser.parse_args()
+    if args.action == "apply" and (
+        not re.fullmatch(r"[0-9a-f]{40}", args.commit) or not re.fullmatch(r"[0-9a-f]{64}", args.sha256)
+    ):
+        raise ValueError("Supply the exact 40-character commit and SHA256 checksum")
     if os.geteuid() != 0:
         raise ValueError("Run as root")
     os.umask(0o077)

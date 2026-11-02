@@ -545,50 +545,81 @@ export function NetworkHistory({
     </section>
   );
 }
+type Health = {
+  gateway: {
+    ready: boolean;
+    dot_connections: number;
+    unauthenticated_failures?: number;
+    tls_rejected?: number;
+    telemetry?: { dropped: number; write_errors: number };
+  };
+  agent: {
+    ready: boolean;
+    error?: string;
+    route?: { error?: string };
+    traffic?: {
+      received_bytes: number;
+      sent_bytes: number;
+      connections: number;
+    };
+  };
+  certificate: { last_success?: number; last_error?: string };
+};
 export function DiagnosticHealth({ notice }: { notice: Notice }) {
-  const { data } = useRemote<any>("/admin/diagnostics", notice);
+  const { data } = useRemote<Health>("/admin/diagnostics", notice);
+  const bytes =
+    (data?.agent.traffic?.received_bytes || 0) +
+    (data?.agent.traffic?.sent_bytes || 0);
+  const formatted =
+    bytes >= 1024 ** 3
+      ? (bytes / 1024 ** 3).toFixed(2) + " ГБ"
+      : (bytes / 1024 ** 2).toFixed(1) + " МБ";
+  const cards = [
+    {
+      name: "DNS-шлюз",
+      ready: data?.gateway?.ready,
+      hint: `Соединений DoT: ${data?.gateway?.dot_connections ?? "—"}`,
+    },
+    {
+      name: "Допуски и выход",
+      ready: data?.agent?.ready,
+      hint:
+        data?.agent?.route?.error || data?.agent?.error || "Контроль маршрута",
+    },
+    {
+      name: "Журналирование",
+      ready:
+        data && data.gateway?.ready && !data.gateway?.telemetry?.write_errors,
+      hint: `Потеряно: ${data?.gateway?.telemetry?.dropped ?? "—"} · ошибок записи: ${data?.gateway?.telemetry?.write_errors ?? "—"}`,
+    },
+    {
+      name: "Продление сертификата",
+      ready:
+        data && data.certificate?.last_success && !data.certificate?.last_error,
+      hint:
+        data?.certificate?.last_error || date(data?.certificate?.last_success),
+    },
+    {
+      name: "HTTPS-трафик",
+      value: data?.agent.traffic ? formatted : "—",
+      hint: "Суммарно с запуска HAProxy; без привязки к ключам",
+    },
+    {
+      name: "Неизвестные ключи",
+      value: data ? number(data.gateway?.unauthenticated_failures) : "—",
+      hint: `С запуска шлюза · отклонений TLS: ${data?.gateway.tls_rejected ?? "—"}`,
+    },
+  ];
   return (
-    <div className="metrics">
-      {[
-        {
-          name: "DNS-шлюз",
-          ready: data?.gateway?.ready,
-          hint: `Соединений DoT: ${data?.gateway?.dot_connections ?? "—"}`,
-        },
-        {
-          name: "Допуски и выход",
-          ready: data?.agent?.ready,
-          hint:
-            data?.agent?.route?.error ||
-            data?.agent?.error ||
-            "Контроль маршрута",
-        },
-        {
-          name: "Журналирование",
-          ready:
-            data &&
-            data.gateway?.ready &&
-            !data.gateway?.telemetry?.write_errors,
-          hint: `Потеряно: ${data?.gateway?.telemetry?.dropped ?? "—"} · ошибок записи: ${data?.gateway?.telemetry?.write_errors ?? "—"}`,
-        },
-        {
-          name: "Продление сертификата",
-          ready:
-            data &&
-            data.certificate?.last_success &&
-            !data.certificate?.last_error,
-          hint:
-            data?.certificate?.last_error ||
-            date(data?.certificate?.last_success),
-        },
-      ].map((c) => (
+    <div className="metrics six">
+      {cards.map((c) => (
         <section className="card metric" key={c.name}>
           <div>
             {c.name}
             <Activity size={16} />
           </div>
-          <strong className={c.ready ? "good" : "warning"}>
-            {!data ? "—" : c.ready ? "В норме" : "Проверить"}
+          <strong className={c.value ? "" : c.ready ? "good" : "warning"}>
+            {c.value ?? (!data ? "—" : c.ready ? "В норме" : "Проверить")}
           </strong>
           <small>{c.hint}</small>
         </section>

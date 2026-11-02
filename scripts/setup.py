@@ -92,6 +92,8 @@ def main() -> None:
     parser.add_argument("--uv")
     parser.add_argument("--skip-packages", action="store_true")
     args = parser.parse_args()
+    if not re.fullmatch(r"[0-9a-f]{40}", args.commit) or not re.fullmatch(r"[0-9a-f]{64}", args.sha256):
+        raise ValueError("Supply the exact 40-character commit and SHA256 checksum")
     if os.geteuid() != 0:
         raise ValueError("Run with sudo")
     os.umask(0o077)
