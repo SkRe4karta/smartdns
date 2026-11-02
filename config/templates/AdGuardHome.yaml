@@ -13,6 +13,7 @@ dns:
   cache_size: 8388608
 tls:
   enabled: false
+  allow_unencrypted_doh: true
 querylog:
   enabled: false
 statistics:

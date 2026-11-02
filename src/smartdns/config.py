@@ -82,11 +82,11 @@ class Settings:
         if raw.get("test_mode"):
             raise ValueError("test_mode cannot be enabled in a deployed configuration")
         credential_dir = os.environ.get("CREDENTIALS_DIRECTORY")
-        if credential_dir:
-            for field, filename in [("master_key_file", "master.key")]:
-                p = Path(credential_dir) / filename
-                if p.exists():
-                    raw[field] = p
+        credential_file = os.environ.get("SMARTDNS_MASTER_KEY_FILE")
+        if credential_file:
+            raw["master_key_file"] = Path(credential_file)
+        elif credential_dir:
+            raw["master_key_file"] = Path(credential_dir) / "master.key"
         result = cls(**raw)
         import ipaddress
         from urllib.parse import urlparse
