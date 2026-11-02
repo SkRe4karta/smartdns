@@ -9,6 +9,7 @@ from .config import Settings
 
 class AgentClient:
     def __init__(self, settings: Settings):
+        self.local_exit_id = settings.local_exit_id
         self._health_until = 0.0
         self._healthy = False
         self._exit_health: dict = {}
@@ -50,13 +51,8 @@ class AgentClient:
             self._exit_health = status.get("exits", {})
             self._health_until = time.monotonic() + 1
         return self._healthy and (
-            exit_id in (None, "fi-primary") or self._exit_health.get(exit_id, {}).get("ready") is True
+            exit_id in (None, self.local_exit_id) or self._exit_health.get(exit_id, {}).get("ready") is True
         )
-
-    async def check_exit(self, exit_id: str) -> dict:
-        response = await self.client.post("/check-exit", json={"exit_id": exit_id})
-        response.raise_for_status()
-        return response.json()
 
     async def preview(self, patterns: list[str]) -> bool:
         try:

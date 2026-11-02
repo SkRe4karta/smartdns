@@ -24,6 +24,7 @@ from .agent_client import AgentClient
 from .catalog import Catalog, ExitPool
 from .config import Settings
 from .db import Database
+from .policy import CONNECTIVITY_NAMES
 from .security import ACCOUNT_RE, DNS_KEY_RE, digest, public_ipv4
 from .telemetry import Recorder
 
@@ -32,8 +33,8 @@ class Gateway:
     def __init__(self, settings: Settings, *, agent: Any = None, upstream: Any = None) -> None:
         self.settings = settings
         self.db = Database(settings.db_path)
-        self.catalog = Catalog(self.db, settings.domain)
-        self.pool = ExitPool(self.db)
+        self.catalog = Catalog(self.db, settings.domain, settings.reserved_sni)
+        self.pool = ExitPool(self.db, settings.local_exit_id)
         self.agent = agent or AgentClient(settings)
         self.upstream = upstream or httpx.AsyncClient(timeout=8, limits=httpx.Limits(max_connections=100))
         self.recorder = Recorder(self.db)
@@ -103,15 +104,17 @@ class Gateway:
         account = self.account(key)
         if not account:
             raise PermissionError("Unknown DNS key")
-        if self.rate_limited(account["id"]):
-            raise BlockingIOError("DNS request limit")
         if not 12 <= len(wire) <= 65535:
             raise ValueError("Invalid DNS message size")
         query = dns.message.from_wire(wire)
         if query.flags & dns.flags.QR or query.opcode() != 0 or len(query.question) != 1:
             raise ValueError("Only single DNS queries are supported")
         question = query.question[0]
-        if question.rdtype in (dns.rdatatype.AXFR, dns.rdatatype.IXFR, dns.rdatatype.ANY):
+        if (
+            self.rate_limited(account["id"])
+            or question.rdclass != 1
+            or question.rdtype in (dns.rdatatype.AXFR, dns.rdatatype.IXFR, dns.rdatatype.ANY)
+        ):
             response = dns.message.make_response(query)
             response.set_rcode(dns.rcode.REFUSED)
             return response.to_wire()
@@ -121,7 +124,9 @@ class Gateway:
         async with self.semaphore:
             try:
                 upstream = await self.upstream.post(
-                    f"{self.settings.agh_url}/dns-query/{account['id']}",
+                    self.settings.probe_resolver
+                    if domain in CONNECTIVITY_NAMES
+                    else f"{self.settings.agh_url}/dns-query/{account['id']}",
                     content=wire,
                     headers={"Content-Type": "application/dns-message", "Accept": "application/dns-message"},
                 )
@@ -142,18 +147,9 @@ class Gateway:
                 elif response.rcode() == dns.rcode.NOERROR:
                     service_id = self.catalog.match(domain)
                     if service_id and question.rdtype in (1, 28, 64, 65):
-                        chosen = None
-                        ready = False
-                        excluded: set[str] = set()
-                        for _ in range(8):
-                            chosen = self.pool.choose(account["id"], service_id, excluded=excluded)
-                            if not chosen:
-                                break
-                            exit_id = chosen["id"]
-                            ready = await self.authorize(account, ip, exit_id)
-                            if ready or not await self.agent.is_ready():
-                                break
-                            excluded.add(exit_id)
+                        chosen = self.pool.choose(account["id"], service_id)
+                        exit_id = chosen["id"] if chosen else None
+                        ready = bool(chosen and await self.authorize(account, ip, chosen["id"]))
                         response = dns.message.make_response(query)
                         response.flags |= dns.flags.RA
                         if not ready:
