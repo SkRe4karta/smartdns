@@ -398,7 +398,7 @@ WantedBy=multi-user.target
         [
             str(ROOT / "current/venv/bin/python"),
             "-c",
-            'from smartdns.policy import CONNECTIVITY_NAMES; print("\n".join(sorted(CONNECTIVITY_NAMES)))',
+            "from smartdns.policy import CONNECTIVITY_NAMES; print(*sorted(CONNECTIVITY_NAMES),sep=chr(10))",
         ]
     )
     write(Path("/etc/haproxy/smartdns-direct.acl"), direct + "\n", 0o600)

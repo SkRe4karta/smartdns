@@ -89,8 +89,10 @@ def main() -> None:
         time.sleep(1)
     # Inner Docker uses a private storage tree and network namespace in this disposable outer container.
     Path("/etc/docker").mkdir(exist_ok=True)
-    Path("/etc/docker/daemon.json").write_text('{"storage-driver":"vfs"}')
-    run(["systemctl", "start", "docker"])
+    Path("/etc/docker/daemon.json").write_text(
+        '{"storage-driver":"vfs","features":{"containerd-snapshotter":false}}'
+    )
+    run(["systemctl", "restart", "docker"])
     command = [
         "python3",
         str(source / "scripts/setup.py"),
