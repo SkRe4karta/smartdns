@@ -36,7 +36,41 @@ test("administrator creates active username and sees every connection on one scr
   await expect(
     card.getByText("ads.example.com", { exact: true }),
   ).toBeVisible();
+  const connection = card.getByRole("heading", {
+    name: /Подключения · версия ключа/,
+  });
+  const journal = card.getByRole("heading", {
+    name: "Журнал DNS",
+    exact: true,
+  });
+  expect((await journal.boundingBox())!.y).toBeGreaterThan(
+    (await connection.boundingBox())!.y,
+  );
+  await card
+    .getByLabel("Username пользователя", { exact: true })
+    .fill("browser-renamed");
+  await card.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(
+    card.getByRole("heading", { name: "browser-renamed", exact: true }),
+  ).toBeVisible();
   await page.screenshot({ path: "test-results/user-card.png", fullPage: true });
+  await card.getByRole("button", { name: "Закрыть", exact: true }).click();
+  await expect(
+    page.getByRole("button", {
+      name: "Редактировать browser-renamed",
+      exact: true,
+    }),
+  ).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .getByRole("button", { name: "Удалить browser-renamed", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", {
+      name: "Редактировать browser-renamed",
+      exact: true,
+    }),
+  ).toHaveCount(0);
 });
 test("desktop admin navigation has no recipient portal or egress page", async ({
   page,
