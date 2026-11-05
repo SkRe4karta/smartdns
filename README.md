@@ -35,7 +35,7 @@ The installer requests the ACME email, prints the DNS records to create, configu
 
 ## Documentation
 
-[Configuration](docs/CONFIGURATION.md) · [architecture](docs/ARCHITECTURE.md) · [operations and recovery](docs/OPERATIONS.md) · [Ubuntu system DNS](docs/UBUNTU.md) · [migration](docs/MIGRATION.md) · [privacy](docs/PRIVACY.md) · [security](SECURITY.md) · [contributing](CONTRIBUTING.md) · [release validation](docs/VALIDATION.md)
+[Configuration](docs/CONFIGURATION.md) · [architecture](docs/ARCHITECTURE.md) · [operations and recovery](docs/OPERATIONS.md) · [Ubuntu system DNS](docs/UBUNTU.md) · [migration](docs/MIGRATION.md) · [privacy](docs/PRIVACY.md) · [security](SECURITY.md) · [contributing](CONTRIBUTING.md) · [release validation](docs/VALIDATION.md) · [optional native game transport](docs/GAMES.md)
 
 ## Boundaries
 
