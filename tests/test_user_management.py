@@ -81,3 +81,28 @@ def test_gemini_additions_survive_reimport(stack):
         assert catalog.match("evilrobinfrontend-pa.googleapis.com") is None
         assert catalog.match("connectivitycheck.gstatic.com") is None
         assert catalog.match("www.google-analytics.com") is None
+
+
+def test_supercell_assets_and_id_remain_in_catalog(stack):
+    importer = CatalogImporter(stack["db"], stack["settings"].catalog_manifest)
+    importer.apply(
+        {
+            "version": "fixture",
+            "at": int(time.time()),
+            "services": [
+                {"id": "supercell", "name": "Supercell", "category": "Games", "capability": "HTTPS"}
+            ],
+            "rules": [{"domain": "supercell.com", "kind": "suffix", "service_id": "supercell"}],
+            "cidrs": [],
+            "skipped": [],
+        }
+    )
+    catalog = Catalog(stack["db"], stack["settings"].domain)
+    for domain in (
+        "game-assets.clashroyaleapp.com",
+        "game-assets.clashofclans.com",
+        "game-assets.brawlstarsgame.com",
+        "security.id.supercell.com",
+    ):
+        assert catalog.match(domain) == "supercell"
+    assert catalog.match("evilgame-assets.clashroyaleapp.com") is None

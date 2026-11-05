@@ -346,9 +346,21 @@
   },
   {
     "id": "supercell",
-    "name": "Supercell",
+    "name": "Supercell / Clash Royale / Clash of Clans / Brawl Stars",
     "category": "Игры",
     "source": "supercell",
-    "capability": "Домены игр, Supercell ID, магазина, обновлений и поддержки. Прямые IP и игровые протоколы не проверены; завершённые игры не поддерживаются."
+    "capability": "Clash Royale, Clash of Clans, Brawl Stars, Hay Day и Boom Beach: HTTPS-ресурсы, Supercell ID, магазин и поддержка. Вход и игровой TCP/UDP требуют проверки на устройстве.",
+    "extra_domains": [
+      "game-assets.clashroyaleapp.com",
+      "game-assets.clashofclans.com",
+      "game-assets.brawlstarsgame.com",
+      "game-assets.haydaygame.com",
+      "game-assets.boombeachgame.com",
+      "cdn.id.supercell.com",
+      "security.id.supercell.com",
+      "accounts.supercell.com",
+      "clashofclans.inbox.supercell.com",
+      "store.supercell.com"
+    ]
   }
 ]

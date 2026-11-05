@@ -284,7 +284,10 @@ class CatalogImporter:
         # Installation-maintained additions survive daily imports and cached upstream snapshots.
         additions = {s["id"]: s for s in json.loads(self.manifest.read_text())}
         candidate["services"] = [
-            dict(s, capability=additions.get(s["id"], s)["capability"]) for s in candidate["services"]
+            dict(
+                s, name=additions.get(s["id"], s)["name"], capability=additions.get(s["id"], s)["capability"]
+            )
+            for s in candidate["services"]
         ]
         extra_rules = {
             (normalize_domain(domain), "exact"): service["id"]
