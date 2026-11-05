@@ -17,8 +17,24 @@
     "id": "gemini",
     "name": "Gemini / AI Studio",
     "category": "ИИ",
-    "source": "google-gemini",
-    "capability": "HTTPS; доступ зависит от аккаунта и региона"
+    "source": "google-deepmind",
+    "capability": "Gemini, AI Studio и мобильный API: HTTPS. Приложение требует проверки на устройстве; доступ также зависит от аккаунта и региона.",
+    "extra_domains": [
+      "gemini.google.com",
+      "gemini.google",
+      "gemini.gstatic.com",
+      "generativelanguage.googleapis.com",
+      "geller-pa.googleapis.com",
+      "proactivebackend-pa.googleapis.com",
+      "robinfrontend-pa.googleapis.com",
+      "geminiweb-pa.clients.google.com",
+      "geminiweb-pa.clients6.google.com",
+      "jnn-pa.googleapis.com",
+      "waa-pa.clients6.google.com",
+      "accounts.google.com",
+      "oauth2.googleapis.com",
+      "www.googleapis.com"
+    ]
   },
   {
     "id": "perplexity",

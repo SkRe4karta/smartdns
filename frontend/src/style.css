@@ -1148,3 +1148,16 @@ tbody tr:hover {
     transition-duration: 0.01ms !important;
   }
 }
+
+.user-actions {
+  text-align: right;
+}
+.user-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.user-action-buttons .danger {
+  color: var(--danger, #c65353);
+}

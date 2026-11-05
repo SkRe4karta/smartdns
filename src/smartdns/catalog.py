@@ -281,6 +281,23 @@ class CatalogImporter:
         if not system_rules or not any(r["domain"] == "pornhub.com" for r in system_rules):
             raise ValueError("Invalid protected routing snapshot")
         candidate = dict(candidate)
+        # Installation-maintained additions survive daily imports and cached upstream snapshots.
+        additions = {s["id"]: s for s in json.loads(self.manifest.read_text())}
+        candidate["services"] = [
+            dict(s, capability=additions.get(s["id"], s)["capability"]) for s in candidate["services"]
+        ]
+        extra_rules = {
+            (normalize_domain(domain), "exact"): service["id"]
+            for service in candidate["services"]
+            for domain in additions.get(service["id"], {}).get("extra_domains", [])
+        }
+        candidate["rules"] = [
+            r for r in candidate["rules"] if (r["domain"], r["kind"]) not in extra_rules
+        ] + [
+            {"domain": domain, "kind": kind, "service_id": service_id}
+            for (domain, kind), service_id in extra_rules.items()
+            if domain not in PROTECTED_NAMES
+        ]
         candidate["services"] = [s for s in candidate["services"] if s["id"] != SYSTEM_SERVICE] + [
             {
                 "id": SYSTEM_SERVICE,
