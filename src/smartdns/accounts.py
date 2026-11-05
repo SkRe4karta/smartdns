@@ -54,6 +54,45 @@ class Accounts:
             self.db.bump(db)
         return {"id": account_id, "username": login, "status": "active"}
 
+    def rename(self, account_id: str, username: str) -> None:
+        username = username.strip().lower()
+        if not LOGIN_RE.fullmatch(username):
+            raise ValueError("Username: 3–40 латинских букв, цифр, точек, дефисов или подчёркиваний")
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute("SELECT 1 FROM accounts WHERE id=?", (account_id,)).fetchone():
+                raise ValueError("Пользователь не найден")
+            db.execute("UPDATE accounts SET login=?,name=? WHERE id=?", (username, username, account_id))
+            self.db.bump(db)
+
+    def delete(self, account_id: str) -> None:
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT role FROM accounts WHERE id=?", (account_id,)).fetchone()
+            if not row:
+                raise ValueError("Пользователь не найден")
+            if row["role"] == "admin":
+                raise ValueError("Удаление администратора запрещено")
+            for table in (
+                "credentials",
+                "invitations",
+                "sessions",
+                "oauth_states",
+                "exceptions",
+                "assignments",
+                "legacy_access",
+                "legacy_networks",
+                "dns_events",
+                "dns_buckets",
+                "network_buckets",
+                "totp",
+                "recovery_codes",
+                "login_challenges",
+            ):
+                db.execute(f"DELETE FROM {table} WHERE account_id=?", (account_id,))  # noqa: S608 -- fixed table allowlist
+            db.execute("DELETE FROM accounts WHERE id=?", (account_id,))
+            self.db.bump(db)
+
     def _session(self, db: sqlite3.Connection, account_id: str) -> tuple[str, str]:
         token, csrf, now = new_token(), new_token(), int(time.time())
         db.execute("DELETE FROM sessions WHERE expires<=?", (now,))

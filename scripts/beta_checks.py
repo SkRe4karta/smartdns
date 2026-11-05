@@ -9,7 +9,12 @@ if __name__ == "__main__":
     parser.add_argument("group", choices=["backend", "integration"])
     group = parser.parse_args().group
     files = (
-        ["tests/test_accounts_api.py", "tests/test_catalog_pool.py", "tests/test_release_v1.py"]
+        [
+            "tests/test_accounts_api.py",
+            "tests/test_catalog_pool.py",
+            "tests/test_release_v1.py",
+            "tests/test_user_management.py",
+        ]
         if group == "backend"
         else ["tests/test_gateway.py", "tests/test_agent_migration.py"]
     )

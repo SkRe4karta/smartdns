@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1
+
+- Extend Gemini routes with exact mobile API endpoints, retained across catalog refreshes.
+- Add administrator username editing and confirmed DNS-user deletion with access revocation; protect administrator accounts.
+- Place the user DNS journal below the connection settings.
+
+
 ## 1.0.0
 
 - Light/dark violet administrator dashboard, generated product icon and responsive diagnostics.
