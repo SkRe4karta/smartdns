@@ -106,3 +106,21 @@ def test_supercell_assets_and_id_remain_in_catalog(stack):
     ):
         assert catalog.match(domain) == "supercell"
     assert catalog.match("evilgame-assets.clashroyaleapp.com") is None
+
+
+def test_native_game_addresses_stay_direct_but_assets_proxy(stack):
+    with stack["db"].connect() as db:
+        db.execute("INSERT INTO services(id,name,category) VALUES('supercell','Supercell','Games')")
+        for domain in ("clashroyaleapp.com", "brawlstarsgame.com", "clashofclans.com"):
+            db.execute("INSERT INTO domain_rules VALUES(?,'suffix','supercell','fixture')", (domain,))
+        stack["db"].bump(db)
+    catalog = Catalog(stack["db"], stack["settings"].domain)
+    for name in ("game.clashroyaleapp.com", "game.brawlstarsgame.com", "gamea.clashofclans.com"):
+        assert catalog.match(name) is None
+    assert catalog.match("game-assets.clashroyaleapp.com") == "supercell"
+    with stack["db"].connect() as db:
+        db.execute(
+            "INSERT INTO route_overrides VALUES('game.clashroyaleapp.com','exact','proxy','supercell')"
+        )
+        stack["db"].bump(db)
+    assert catalog.match("game.clashroyaleapp.com") == "supercell"

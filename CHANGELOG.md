@@ -4,6 +4,7 @@
 
 - Extend Gemini routes with exact mobile API endpoints, retained across catalog refreshes.
 - Retain explicit Supercell resource and ID endpoints and list the supported game families.
+- Keep native game-server DNS answers direct instead of pointing their raw TCP traffic at the HTTPS listener; explicit route overrides retain priority.
 - Document VPN/Private DNS reachability checks and safe IPv6 advertisement.
 - Add administrator username editing and confirmed DNS-user deletion with access revocation; protect administrator accounts.
 - Place the user DNS journal below the connection settings.

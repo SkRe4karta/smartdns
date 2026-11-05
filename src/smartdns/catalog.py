@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 
 from .db import Database
-from .policy import CONNECTIVITY_NAMES, SYSTEM_SERVICE
+from .policy import CONNECTIVITY_NAMES, DIRECT_GAME_NAMES, SYSTEM_SERVICE
 from .security import normalize_domain
 
 PROTECTED_NAMES = CONNECTIVITY_NAMES
@@ -77,6 +77,8 @@ class Catalog:
             candidate = ".".join(parts[i:])
             if candidate in self.overrides_suffix:
                 return self.overrides_suffix[candidate]
+        if name in DIRECT_GAME_NAMES:
+            return None
         if name in self.exact:
             return self.exact[name]
         parts = name.split(".")
