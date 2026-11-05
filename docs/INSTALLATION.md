@@ -44,3 +44,5 @@ sudo python3 /opt/smartdns/current/scripts/certificates.py dry-run
 Then apply the active production certificate once to verify the deployment hook. Staging certificates are refused by the deployment helper. DoT reloads the certificate for new handshakes; existing sessions continue.
 
 Repeat setup with the verified next artifact to upgrade an installed default deployment. The same installed artifact is a no-op. Application updates preserve keys and policies. See OPERATIONS for coherent backups and rollback. If an installation was interrupted, review the reported failure before retrying; never delete the master key to start over.
+
+Optional native game transport is documented separately in [GAMES.md](GAMES.md). It is opt-in, requires reviewed client-version pairs, and is not enabled by the normal installer.

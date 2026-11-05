@@ -14,6 +14,7 @@ if __name__ == "__main__":
             "tests/test_catalog_pool.py",
             "tests/test_release_v1.py",
             "tests/test_user_management.py",
+            "tests/test_game_transport.py",
         ]
         if group == "backend"
         else ["tests/test_gateway.py", "tests/test_agent_migration.py"]
