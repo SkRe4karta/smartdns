@@ -24,6 +24,35 @@ def test_delete_protected_and_authorized(client, friend_client, stack):
     stack["accounts"].exception(account_id, "ads.example.test", "block")
     assert client.delete(endpoint).status_code == 200
     assert client.get(endpoint).status_code == 404
+    from smartdns.telemetry import Recorder
+
+    Recorder(stack["db"]).flush(
+        [
+            dict(
+                account_id=account_id,
+                at=int(time.time()),
+                domain="example.test",
+                qtype="A",
+                result="allowed",
+                service_id=None,
+                exit_id=None,
+                elapsed_ms=1,
+                client_ip="203.0.113.20",
+                transport="dot",
+                key_version=1,
+                rcode="NOERROR",
+                reason=None,
+            )
+        ]
+    )
+    with stack["db"].connect(readonly=True) as db:
+        assert (
+            db.execute("SELECT COUNT(*) FROM dns_events WHERE account_id=?", (account_id,)).fetchone()[0] == 0
+        )
+        assert (
+            db.execute("SELECT COUNT(*) FROM network_buckets WHERE account_id=?", (account_id,)).fetchone()[0]
+            == 0
+        )
     assert client.delete(endpoint).status_code == 404
     with stack["db"].connect(readonly=True) as db:
         assert (

@@ -36,6 +36,10 @@ class Recorder:
     def flush(self, rows: list[dict[str, Any]]) -> None:
         now = int(time.time())
         with self.db.connect() as db:
+            # A query finishing during deletion must not resurrect the deleted user's history.
+            db.execute("BEGIN IMMEDIATE")
+            active_ids = {row[0] for row in db.execute("SELECT id FROM accounts")}
+            rows = [row for row in rows if not row["account_id"] or row["account_id"] in active_ids]
             db.executemany(
                 "INSERT INTO dns_events(account_id,at,domain,qtype,result,service_id,exit_id,elapsed_ms,"
                 "client_ip,transport,key_version,rcode,reason) VALUES(:account_id,:at,:domain,:qtype,:result,"
