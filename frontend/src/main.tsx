@@ -14,6 +14,8 @@ import {
   LogOut,
   Menu,
   Plus,
+  Pencil,
+  Trash2,
   RefreshCw,
   Search,
   Server,
@@ -766,6 +768,7 @@ function UserCard({
 }) {
   const [revision, setRevision] = useState(0);
   const [days, setDays] = useState(1);
+  const [username, setUsername] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { data, loading } = useData(
     "/admin/users/" + id + "?days=" + days,
@@ -848,6 +851,34 @@ function UserCard({
                 {date(data.user.last_dns)}
               </p>
             </div>
+            <section className="card">
+              <h3>Редактировать пользователя</h3>
+              <form
+                className="inline-form"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  await action("", "PUT", {
+                    username: username ?? data.user.login,
+                  });
+                }}
+              >
+                <input
+                  aria-label="Username пользователя"
+                  value={username ?? data.user.login}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required
+                  pattern="[A-Za-z0-9._-]{3,40}"
+                  minLength={3}
+                  maxLength={40}
+                />
+                <button className="primary" disabled={busy}>
+                  Сохранить
+                </button>
+              </form>
+              <small>
+                Изменение username сохраняет DNS-ключ и подключения устройств.
+              </small>
+            </section>
             <div className="card">
               <div className="card-head">
                 <h3>DNS-активность</h3>
@@ -886,8 +917,8 @@ function UserCard({
               </div>
             </div>
             <NetworkHistory id={id} notice={notice} revision={revision} />
-            <DNSJournal accountId={id} notice={notice} />
             <ConnectionCards id={id} notice={notice} revision={revision} />
+            <DNSJournal accountId={id} notice={notice} />
             <Filtering accountId={id} notice={notice} onChange={onChange} />
             <section className="card danger-zone">
               <button
@@ -995,6 +1026,7 @@ function AdminUsers({ notice }: { notice: Notice }) {
                   <th>Username</th>
                   <th>Доступ</th>
                   <th>Активность DNS</th>
+                  <th className="user-actions">Действия</th>
                 </tr>
               </thead>
               <tbody>
@@ -1017,6 +1049,49 @@ function AdminUsers({ notice }: { notice: Notice }) {
                         </Pill>
                       </td>
                       <td>{date(u.last_dns)}</td>
+                      <td className="user-actions">
+                        <div className="user-action-buttons">
+                          <button
+                            className="secondary"
+                            onClick={() => setSelected(u.id)}
+                            aria-label={"Редактировать " + u.login}
+                          >
+                            <Pencil size={15} /> Редактировать
+                          </button>
+                          <button
+                            className="secondary danger"
+                            disabled={busy || u.role === "admin"}
+                            aria-label={"Удалить " + u.login}
+                            title={
+                              u.role === "admin"
+                                ? "Удаление администратора запрещено"
+                                : "Удалить пользователя"
+                            }
+                            onClick={async () => {
+                              if (
+                                !confirm(
+                                  "Удалить пользователя «" +
+                                    u.login +
+                                    "»? DNS-ключ перестанет работать, настройки и статистика будут удалены. Это действие нельзя отменить в панели.",
+                                )
+                              )
+                                return;
+                              setBusy(true);
+                              try {
+                                await api("/admin/users/" + u.id, "DELETE");
+                                setRevision((x) => x + 1);
+                                notice("Пользователь удалён");
+                              } catch (e) {
+                                notice((e as Error).message, true);
+                              } finally {
+                                setBusy(false);
+                              }
+                            }}
+                          >
+                            <Trash2 size={15} /> Удалить
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
               </tbody>

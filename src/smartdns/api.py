@@ -379,6 +379,21 @@ def create_app(settings: Settings | None = None, *, agent: Any = None) -> FastAP
         db.audit(user["id"], "user.created", result["id"])
         return result
 
+    @app.put("/api/v1/admin/users/{account_id}")
+    async def rename_user(account_id: str, body: NewUser, user: Admin) -> dict[str, Any]:
+        target(account_id)
+        accounts.rename(account_id, body.username)
+        db.audit(user["id"], "user.renamed", account_id)
+        return {"ok": True}
+
+    @app.delete("/api/v1/admin/users/{account_id}")
+    async def delete_user(account_id: str, user: Admin) -> dict[str, Any]:
+        target(account_id)
+        accounts.delete(account_id)
+        await control.reconcile()
+        db.audit(user["id"], "user.deleted", account_id)
+        return {"ok": True}
+
     @app.patch("/api/v1/admin/users/{account_id}")
     async def user_status(account_id: str, body: Enabled, user: Admin) -> dict[str, Any]:
         accounts.status(account_id, body.enabled)
