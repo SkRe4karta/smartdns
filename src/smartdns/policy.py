@@ -19,3 +19,17 @@ CONNECTIVITY_NAMES = frozenset(
     }
 )
 SYSTEM_SERVICE = "system-adult"
+
+# These clients use native game transports, not the HTTPS listener. Keep resources proxied.
+DIRECT_GAME_NAMES = frozenset(
+    {
+        "game.clashroyaleapp.com",
+        "game.brawlstarsgame.com",
+        "gamea.clashofclans.com",
+        "game.clashofclans.com",
+        "game.haydaygame.com",
+        "game.boombeachgame.com",
+        "game.squadbustersgame.com",
+        "game.mocogame.com",
+    }
+)
