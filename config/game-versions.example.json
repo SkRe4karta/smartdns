@@ -1,4 +1,20 @@
 {
-  "royale": [{"protocol": 3, "major": 16}],
-  "brawl": [{"protocol": 2, "major": 70}]
+  "royale": [
+    {
+      "protocol": 3,
+      "major": 16
+    }
+  ],
+  "brawl": [
+    {
+      "protocol": 2,
+      "major": 70
+    }
+  ],
+  "clans": [
+    {
+      "protocol": 3,
+      "major": 18
+    }
+  ]
 }
